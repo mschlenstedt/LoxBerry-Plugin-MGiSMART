@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128" role="img" aria-label="MG iSMART">
+	<title>MG iSMART</title>
+	<rect width="128" height="128" rx="24" fill="#d0021b"/>
+
+	<!-- Car body, seen from the front three-quarter: a simple silhouette that
+	     stays readable at the small sizes the plugin list uses. -->
+	<path d="M26 78c0-3 1-6 3-8l6-6 7-14c1.6-3.2 4.9-5 8.5-5h27c3.6 0 6.9 1.8 8.5 5l7 14 6 6c2 2 3 5 3 8v10c0 2.2-1.8 4-4 4h-6c-2.2 0-4-1.8-4-4v-3H40v3c0 2.2-1.8 4-4 4h-6c-2.2 0-4-1.8-4-4z" fill="#fff"/>
+	<path d="M44.5 49.5c.9-1.8 2.7-2.5 4.6-2.5h29.8c1.9 0 3.7.7 4.6 2.5L89 62H39z" fill="#d0021b"/>
+	<circle cx="43" cy="72" r="5" fill="#d0021b"/>
+	<circle cx="85" cy="72" r="5" fill="#d0021b"/>
+
+	<!-- Charging bolt: what distinguishes this from any other car plugin. -->
+	<path d="M67 84h-9l-7 20h8l-3 16 16-24h-9z" fill="#f5a623" stroke="#fff" stroke-width="2.5" stroke-linejoin="round"/>
+</svg>

@@ -1,0 +1,5 @@
+#!/bin/bash
+
+# Restarts the gateway if it died unexpectedly. Does nothing when the user
+# stopped it on purpose or when the software is not installed.
+REPLACELBPBINDIR/watchdog.pl --action=check

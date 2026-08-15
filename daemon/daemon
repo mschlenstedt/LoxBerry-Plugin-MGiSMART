@@ -1,0 +1,34 @@
+#!/bin/bash
+
+# Runs as root at every LoxBerry boot.
+#
+# Hands the gateway start over to the plugin watchdog, which is run as the
+# loxberry user: the gateway, its PID file, its logs and the web interface then
+# all belong to the same user, so the web interface can stop and restart what
+# the boot started.
+#
+# The watchdog refuses to start when the manual stop marker is present, so a
+# gateway the user stopped stays stopped across a reboot.
+
+LOGFILE=REPLACELBPLOGDIR/daemon.log
+WATCHDOG=REPLACELBPBINDIR/watchdog.pl
+RUNTIME_DIR=/var/run/shm/REPLACELBPPLUGINDIR
+
+mkdir -p "$(dirname "$LOGFILE")"
+
+echo "$(date) - Start Init" >>$LOGFILE
+
+# The runtime directory lives on a tmpfs and is gone after a reboot.
+mkdir -p "$RUNTIME_DIR"
+chown loxberry:loxberry "$RUNTIME_DIR"
+chmod 0750 "$RUNTIME_DIR"
+
+if [ -x "$WATCHDOG" ]; then
+	echo "$(date) - Starting the gateway through the plugin watchdog" >>$LOGFILE
+	su loxberry -c "$WATCHDOG --action=start" >>$LOGFILE 2>&1
+else
+	echo "$(date) - Watchdog not found: $WATCHDOG" >>$LOGFILE
+fi
+
+echo "$(date) - End Init" >>$LOGFILE
+exit 0

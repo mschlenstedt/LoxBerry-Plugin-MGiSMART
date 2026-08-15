@@ -1,0 +1,104 @@
+name: Release asset
+
+on:
+  push:
+    tags:
+      - "MGiSMART-V*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag, for example MGiSMART-V0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  build-release-asset:
+    name: Build and upload plugin ZIP
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Determine release tag
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+
+          case "$tag" in
+            MGiSMART-V*) ;;
+            *)
+              echo "Unsupported tag format: $tag" >&2
+              exit 1
+              ;;
+          esac
+
+          version="${tag#MGiSMART-V}"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check out release tag
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.release.outputs.tag }}
+
+      - name: Build plugin ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag="${{ steps.release.outputs.tag }}"
+          version="${{ steps.release.outputs.version }}"
+          prefix="LoxBerry-Plugin-MGiSMART-$tag/"
+          zip="dist/MGiSMART-V$version.zip"
+
+          mkdir -p dist
+          # --worktree-attributes honours the export-ignore rules in
+          # .gitattributes, which keep .github out of the installable archive.
+          git archive --format=zip --worktree-attributes --prefix="$prefix" -o "$zip" "$tag"
+
+          unzip -t "$zip"
+          unzip -p "$zip" "${prefix}plugin.cfg" | tr -d '\r' | grep -Fx "VERSION=$version"
+
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          version="${{ steps.release.outputs.version }}"
+          notes="dist/release-notes.md"
+
+          printf 'MG iSMART V%s\n' "$version" > "$notes"
+
+      - name: Create release with plugin ZIP
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          tag="${{ steps.release.outputs.tag }}"
+          version="${{ steps.release.outputs.version }}"
+          zip="dist/MGiSMART-V$version.zip"
+          notes="dist/release-notes.md"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "Release $tag already exists. Refusing to modify an existing release." >&2
+            exit 1
+          fi
+
+          gh release create "$tag" "$zip" \
+            --draft \
+            --prerelease \
+            --verify-tag \
+            --title "MG iSMART V$version" \
+            --notes-file "$notes"
+
+          gh release edit "$tag" --draft=false --prerelease

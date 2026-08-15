@@ -1,0 +1,221 @@
+#!/usr/bin/perl
+
+# healthcheck - LoxBerry healthcheck for the MG iSMART plugin
+#
+# Found by the core on its own: sbin/healthcheck.pl walks the installed plugins
+# and picks up every executable named "healthcheck" in <plugin>/bin. No
+# registration anywhere. Called as:
+#
+#   healthcheck title   -> description only
+#   healthcheck check   -> description, status and result
+#
+# and answers with JSON on stdout:
+#
+#   { "desc": "...", "status": 5, "result": "..." }
+#
+# Status codes: 3 = ERROR, 4 = WARNING, 5 = OK, 6 = INFO - and the WORST,
+# meaning the lowest, wins.
+#
+# The core folds a plugin into ONE row of the healthcheck table and reads only
+# desc, status and result; title/url/logfile are ignored for plugin checks. Space
+# in that row is tight and the same text goes into the notification mail, so
+# every area contributes a single short clause "Area: STATUS (detail)".
+#
+# Runs daily by cron, shortly after every reboot, and synchronously when someone
+# opens the Healthcheck page - the core calls us without a timeout of its own,
+# so everything in here is kept on a short leash:
+#
+#   - no GitHub request; the "Software" area reads only the cache the Update tab
+#     fills, otherwise a page view would spend the API rate limit and hang on
+#     network latency
+#   - no action: nothing is started, stopped or written
+#   - a short MQTT timeout, and no answer is a WARNING rather than an ERROR - a
+#     silent broker is not this plugin's fault
+
+use strict;
+use warnings;
+use JSON::PP;
+use FindBin;
+use lib $FindBin::Bin;
+use LoxBerry::System;
+use LoxBerry::IO;
+use MGiSMART qw(plugin_config installed_version gateway_installed topic_root topic_prefix trim);
+
+my $desc = 'Checks the MG iSMART gateway: process, software, config and cloud';
+
+# Pure ASCII output: the core re-decodes our stdout without knowing its encoding.
+my $out = JSON::PP->new->ascii->canonical;
+
+my $action = defined $ARGV[0] ? $ARGV[0] : 'check';
+if ($action ne 'check') {
+	print $out->encode({ desc => $desc });
+	exit 0;
+}
+
+my @summary;    # one clause per area
+my $status;     # aggregated, lowest wins
+
+my $loglink = qq{ <a href="/admin/plugins/$lbpplugindir/index.cgi?form=logfiles">Log</a>.};
+
+my $cfg       = plugin_config();
+my $configdir = $lbpconfigdir;
+
+#############################################################
+# Area: Gateway (the process)
+#############################################################
+
+# A manual stop is a decision, not a fault - report it and check nothing else,
+# because without a running process everything below is red by definition.
+if (-e "$configdir/gateway_stopped.cfg") {
+	finish(6, 'Gateway: INFO (stopped manually).');
+}
+
+my $pid = gateway_pid();
+if ($pid) {
+	area(5, "Gateway: OK (PID $pid)");
+}
+else {
+	# Not installed is a different problem than installed-but-dead, and naming it
+	# saves the user a pointless look into the log.
+	if (!gateway_installed()) {
+		finish(3, 'Gateway: ERROR (not installed).' . $loglink);
+	}
+	finish(3, 'Gateway: ERROR (not running).' . $loglink);
+}
+
+#############################################################
+# Area: Software (installed version, cached update info)
+#############################################################
+
+my $current = installed_version();
+my $cached  = cached_available();
+
+if (!length($current)) {
+	area(4, 'Software: WARNING (version unknown)');
+}
+elsif (length($cached) && $cached ne $current) {
+	# Only INFO: a pending update is not a defect, and the result text also goes
+	# out as a notification. A WARNING here would mail the user every single day
+	# until they update.
+	area(6, "Software: INFO ($current, $cached available)");
+}
+else {
+	area(5, "Software: OK ($current)");
+}
+
+#############################################################
+# Area: Config
+#############################################################
+
+my $user = trim($cfg->{saic_user} // '');
+my $pass = $cfg->{saic_password} // '';
+
+if (!length($user) || !length($pass)) {
+	finish(3, clauses() . ' Config: ERROR (no iSMART credentials).' . $loglink);
+}
+area(5, 'Config: OK');
+
+#############################################################
+# Area: Cloud (retained topics published by the gateway)
+#############################################################
+
+my $root = topic_root($cfg);
+if (!length($root)) {
+	area(4, 'Cloud: WARNING (no topic)');
+}
+else {
+	# The last will sits directly below the prefix, the account topics below the
+	# prefix *and* the account name - see MGiSMART::topic_root.
+	my $lwt        = mqtt_read(topic_prefix($cfg) . '/_internal/lwt');
+	my $lastlogin  = mqtt_read("$root/account/lastLogin");
+	my $lasterror  = mqtt_read("$root/account/lastLoginError");
+
+	if (!defined($lwt) && !defined($lastlogin) && !defined($lasterror)) {
+		# Nothing retained at all: either the broker is unreachable or the gateway
+		# has not published yet. Both are worth a look, neither is proof of a fault.
+		area(4, 'Cloud: WARNING (no answer)');
+	}
+	elsif (defined($lasterror) && (!defined($lastlogin) || $lasterror gt $lastlogin)) {
+		# Both timestamps are UTC ISO 8601, so a string compare orders them
+		# correctly. A login error newer than the last success means the
+		# credentials or the account are the problem.
+		area(3, 'Cloud: ERROR (login failed)');
+	}
+	elsif (defined($lwt) && lc($lwt) eq 'offline') {
+		area(4, 'Cloud: WARNING (offline)');
+	}
+	elsif (defined($lastlogin)) {
+		area(5, 'Cloud: OK (online)');
+	}
+	else {
+		area(4, 'Cloud: WARNING (not logged in yet)');
+	}
+}
+
+finish($status, clauses());
+
+#############################################################
+# Helpers
+#############################################################
+
+# The watchdog's "pid" action is the cheap probe: no log session, no lock.
+sub gateway_pid
+{
+	my $watchdog = "$lbpbindir/watchdog.pl";
+	return 0 if (!-x $watchdog);
+	my (undef, $output) = LoxBerry::System::execute(command => "$watchdog --action=pid 2>/dev/null");
+	$output = '' if (!defined($output));
+	my ($found) = $output =~ /(\d+)/;
+	return $found ? $found : 0;
+}
+
+# The newest version as recorded by the Update tab. Deliberately read from the
+# cache file only - see the note at the top about not calling GitHub here.
+sub cached_available
+{
+	my $file = "/var/run/shm/$lbpplugindir/release_cache.json";
+	return '' if (!-e $file);
+	open(my $fh, '<', $file) or return '';
+	local $/;
+	my $raw = <$fh>;
+	close($fh);
+	return '' if (!defined($raw) || $raw !~ /\S/);
+	my $data = eval { JSON::PP->new->relaxed->decode($raw) };
+	return '' if ($@ || ref($data) ne 'HASH');
+	return $data->{version} // '';
+}
+
+sub mqtt_read
+{
+	my ($topic) = @_;
+	my $value = eval { LoxBerry::IO::mqtt_get($topic, 400) };
+	return undef if ($@ || !defined($value) || $value eq '');
+	return $value;
+}
+
+# Adds one clause and keeps the worst status seen so far (lower = more severe,
+# matching the core's own setstatus()).
+sub area
+{
+	my ($new, $clause) = @_;
+	push @summary, $clause;
+	$status = $new if (!$status || $new < $status);
+	return;
+}
+
+sub clauses
+{
+	return join(' ', map { "$_." } @summary);
+}
+
+sub finish
+{
+	my ($st, $result) = @_;
+	$st = 6 if (!defined($st));
+	print $out->encode({
+		desc   => $desc,
+		status => "$st",
+		result => $result,
+	});
+	exit 0;
+}

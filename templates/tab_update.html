@@ -1,0 +1,44 @@
+<div class="lb-content">
+
+<div id="gw-service"></div>
+
+<details class="lb-collapsible" open>
+	<summary style="font-size:1.15em; font-weight:700;"><TMPL_VAR MGISMART.UPG_HEADING></summary>
+	<div class="lb-collapsible-content">
+		<p style="color:var(--lb-text-muted); font-size:0.9rem; line-height:1.6; margin:0 0 16px;"><TMPL_VAR MGISMART.UPG_HINT></p>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="upg-channel"><TMPL_VAR MGISMART.UPG_CHANNEL></label>
+			<div class="lb-form-field">
+				<select class="lb-input" id="upg-channel" onchange="upgChannelChange();">
+					<option value="release"><TMPL_VAR MGISMART.UPG_CHANNEL_RELEASE></option>
+					<option value="prerelease"><TMPL_VAR MGISMART.UPG_CHANNEL_PRERELEASE></option>
+				</select>
+			</div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.UPG_CHANNEL_HELP></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label"><TMPL_VAR MGISMART.UPG_LABEL_CURRENT></label>
+			<div class="lb-form-field"><span id="upg-current" style="font-family:var(--lb-font-mono)">…</span></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label"><TMPL_VAR MGISMART.UPG_LABEL_AVAILABLE></label>
+			<div class="lb-form-field"><span id="upg-available" style="font-family:var(--lb-font-mono)">…</span></div>
+		</div>
+
+		<div id="upg-version-hint" style="display:none; text-align:center; margin-top:0.5em;"></div>
+
+		<div class="lb-actions" style="margin-top:1em;">
+			<button type="button" id="upg-btn" class="lb-btn lb-btn-primary" onclick="upgradeGateway(); return false;" disabled><TMPL_VAR MGISMART.UPG_BUTTON></button>
+			<button type="button" id="upg-check-btn" class="lb-btn" onclick="upgVersions(true); return false;"><TMPL_VAR MGISMART.UPG_CHECK_BUTTON></button>
+		</div>
+
+		<div id="upg-status" style="display:none; text-align:center; margin-top:0.5em;"></div>
+
+		<div class="lb-form-help" style="margin-top:1.2em;"><TMPL_VAR MGISMART.UPG_HINT_RESTART></div>
+	</div>
+</details>
+
+</div>

@@ -1,0 +1,56 @@
+#!/bin/sh
+
+# Executed as root during plugin uninstall. LoxBerry stores a copy of this
+# script outside the plugin at install time and runs it with the usual
+# arguments:
+#   command <TEMPFOLDER> <NAME> <FOLDER> <VERSION> <BASEFOLDER>
+#
+# Everything this plugin installed lives below its own data directory: the
+# gateway source and a private Python venv. Nothing was installed system-wide,
+# so removing those directories leaves no traces behind - and no other plugin
+# can be affected, which is exactly why the dependencies went into a venv in the
+# first place.
+#
+# LoxBerry treats an exit code > 1 as fatal and aborts the whole uninstall, so
+# every step is tolerant and the script always ends with "exit 0".
+
+ARGV3=$3
+ARGV5=$5
+
+BINDIR="$ARGV5/bin/plugins/$ARGV3"
+DATADIR="$ARGV5/data/plugins/$ARGV3"
+RUNTIME_DIR="/var/run/shm/$ARGV3"
+WATCHDOG="$BINDIR/watchdog.pl"
+
+# Stop the gateway while the plugin files are still present.
+if [ -x "$WATCHDOG" ]; then
+	echo "<INFO> Stopping the gateway"
+	su loxberry -c "$WATCHDOG --action=stop" >/dev/null 2>&1 || true
+fi
+
+# Belt and braces: if the watchdog was already gone, end any process still
+# running from this plugin's installation directory.
+if [ -d "$DATADIR" ]; then
+	for procdir in /proc/[0-9]*; do
+		[ -r "$procdir/cmdline" ] || continue
+		if tr '\0' ' ' <"$procdir/cmdline" 2>/dev/null | grep -q "$DATADIR/gateway/src/main.py"; then
+			pid="$(basename "$procdir")"
+			echo "<INFO> Ending leftover gateway process $pid"
+			kill -TERM "$pid" 2>/dev/null || true
+			sleep 1
+			[ -d "/proc/$pid" ] && kill -KILL "$pid" 2>/dev/null
+		fi
+	done
+fi
+
+if [ -d "$DATADIR" ]; then
+	echo "<INFO> Removing the gateway installation and its Python environment"
+	rm -rf "$DATADIR"
+fi
+
+if [ -d "$RUNTIME_DIR" ]; then
+	echo "<INFO> Removing the runtime directory"
+	rm -rf "$RUNTIME_DIR"
+fi
+
+exit 0

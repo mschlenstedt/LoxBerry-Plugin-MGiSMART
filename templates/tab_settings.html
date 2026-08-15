@@ -1,0 +1,133 @@
+<div class="lb-content">
+
+<div id="gw-service"></div>
+
+<form id="settings-form" onsubmit="return false;">
+
+<details class="lb-collapsible" open>
+	<summary style="font-size:1.15em; font-weight:700;"><TMPL_VAR MGISMART.SET_SECTION_ACCOUNT></summary>
+	<div class="lb-collapsible-content">
+		<p style="color:var(--lb-text-muted); font-size:0.9rem; line-height:1.6; margin:0 0 16px;"><TMPL_VAR MGISMART.SET_ACCOUNT_HINT></p>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="set-user"><TMPL_VAR MGISMART.SET_USER></label>
+			<div class="lb-form-field"><input class="lb-input" type="text" id="set-user" autocomplete="off"></div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.SET_USER_HELP></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="set-password"><TMPL_VAR MGISMART.SET_PASSWORD></label>
+			<div class="lb-form-field" style="display:flex; gap:6px; align-items:center;">
+				<input class="lb-input" type="password" id="set-password" autocomplete="new-password" style="flex:1 1 auto;">
+				<button type="button" class="lb-btn lb-btn-icon" id="set-password-toggle" onclick="setTogglePassword(); return false;" title="<TMPL_VAR MGISMART.SET_PASSWORD_SHOW>"><i class="pi pi-eye"></i></button>
+			</div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="set-region"><TMPL_VAR MGISMART.SET_REGION></label>
+			<div class="lb-form-field">
+				<select class="lb-input" id="set-region">
+					<option value="eu"><TMPL_VAR MGISMART.SET_REGION_EU></option>
+					<option value="au"><TMPL_VAR MGISMART.SET_REGION_AU></option>
+					<option value="tr"><TMPL_VAR MGISMART.SET_REGION_TR></option>
+				</select>
+			</div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.SET_REGION_HELP></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="set-countrycode"><TMPL_VAR MGISMART.SET_COUNTRYCODE></label>
+			<div class="lb-form-field"><input class="lb-input" type="text" id="set-countrycode" placeholder="49"></div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.SET_COUNTRYCODE_HELP></div>
+		</div>
+	</div>
+</details>
+
+<details class="lb-collapsible" open>
+	<summary style="font-size:1.15em; font-weight:700;"><TMPL_VAR MGISMART.SET_SECTION_MQTT></summary>
+	<div class="lb-collapsible-content">
+		<p style="color:var(--lb-text-muted); font-size:0.9rem; line-height:1.6; margin:0 0 16px;"><TMPL_VAR MGISMART.SET_MQTT_HINT></p>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="set-topic"><TMPL_VAR MGISMART.SET_TOPIC></label>
+			<div class="lb-form-field"><input class="lb-input" type="text" id="set-topic" placeholder="saic"></div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.SET_TOPIC_HELP></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="set-hadiscovery"><TMPL_VAR MGISMART.SET_HADISCOVERY></label>
+			<div class="lb-form-field"><input type="checkbox" id="set-hadiscovery"></div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.SET_HADISCOVERY_HELP></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label"><TMPL_VAR MGISMART.SET_LOGLEVEL></label>
+			<div class="lb-form-field"><span id="set-loglevel" style="color:var(--lb-text-muted)">…</span></div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.SET_LOGLEVEL_HELP></div>
+		</div>
+	</div>
+</details>
+
+<details class="lb-collapsible">
+	<summary style="font-size:1.15em; font-weight:700;"><TMPL_VAR MGISMART.SET_SECTION_ADVANCED></summary>
+	<div class="lb-collapsible-content">
+		<p style="color:var(--lb-text-muted); font-size:0.9rem; line-height:1.6; margin:0 0 16px;"><TMPL_VAR MGISMART.SET_ADVANCED_HINT></p>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="set-relogin"><TMPL_VAR MGISMART.SET_RELOGIN></label>
+			<div class="lb-form-field"><input class="lb-input" type="number" id="set-relogin" min="0" placeholder="900"></div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.SET_RELOGIN_HELP></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="set-messages"><TMPL_VAR MGISMART.SET_MESSAGES></label>
+			<div class="lb-form-field"><input class="lb-input" type="number" id="set-messages" min="0" placeholder="60"></div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.SET_MESSAGES_HELP></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="set-accountrefresh"><TMPL_VAR MGISMART.SET_ACCOUNTREFRESH></label>
+			<div class="lb-form-field"><input class="lb-input" type="number" id="set-accountrefresh" min="0" placeholder="86400"></div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.SET_ACCOUNTREFRESH_HELP></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="set-chargemin"><TMPL_VAR MGISMART.SET_CHARGEMIN></label>
+			<div class="lb-form-field"><input class="lb-input" type="text" id="set-chargemin" placeholder="1.0"></div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.SET_CHARGEMIN_HELP></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="set-battery"><TMPL_VAR MGISMART.SET_BATTERY></label>
+			<div class="lb-form-field"><input class="lb-input" type="text" id="set-battery" placeholder="LSJXXXX=64.0"></div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.SET_BATTERY_HELP></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="set-timezone"><TMPL_VAR MGISMART.SET_TIMEZONE></label>
+			<div class="lb-form-field"><input class="lb-input" type="text" id="set-timezone" placeholder="Europe/Berlin"></div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.SET_TIMEZONE_HELP></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="set-allowdots"><TMPL_VAR MGISMART.SET_ALLOWDOTS></label>
+			<div class="lb-form-field"><input type="checkbox" id="set-allowdots"></div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.SET_ALLOWDOTS_HELP></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="set-extraenv"><TMPL_VAR MGISMART.SET_EXTRAENV></label>
+			<div class="lb-form-field"><textarea class="lb-input" id="set-extraenv" rows="5" spellcheck="false" style="font-family:var(--lb-font-mono)"></textarea></div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.SET_EXTRAENV_HELP></div>
+		</div>
+	</div>
+</details>
+
+<div class="lb-actions" style="margin-top:1em;">
+	<button type="button" class="lb-btn lb-btn-primary" onclick="setSave(); return false;"><TMPL_VAR COMMON.SAVE></button>
+</div>
+<div id="set-savinghint" style="display:none; text-align:center; margin-top:0.5em;"></div>
+
+</form>
+
+</div>

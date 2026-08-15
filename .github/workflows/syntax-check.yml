@@ -1,0 +1,81 @@
+name: Syntax check
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  syntax-check:
+    name: Perl and shell syntax
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install syntax check dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sudo find /etc/apt/sources.list.d \
+            -type f \( -iname '*microsoft*' -o -iname '*azure*' \) \
+            -delete
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libconfig-simple-perl \
+            libcgi-pm-perl \
+            libfile-homedir-perl \
+            libhtml-template-perl \
+            libjson-perl
+
+      - name: Check Perl syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # bin/healthcheck has no extension - the LoxBerry core finds plugin
+          # health checks by that exact name - so it is listed explicitly.
+          found=0
+          while IFS= read -r -d '' file; do
+            found=1
+            perl -I .github/ci/perl-lib -I bin -c "$file"
+          done < <(find . -type f \( -name '*.pl' -o -name '*.pm' -o -name '*.cgi' \) -print0)
+
+          perl -I .github/ci/perl-lib -I bin -c bin/healthcheck
+
+          if [ "$found" -eq 0 ]; then
+            echo "No Perl files found."
+          fi
+
+      - name: Check shell syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for file in postroot.sh preupgrade.sh postupgrade.sh uninstall/uninstall; do
+            [ ! -f "$file" ] || sh -n "$file"
+          done
+
+          for file in bin/gateway_pkg.sh daemon/daemon cron/cron.05min; do
+            [ ! -f "$file" ] || bash -n "$file"
+          done
+
+      - name: Check for hardcoded paths
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # plugininstall.pl greps the archive for /opt/loxberry and warns about
+          # it, because the plugin folder is dynamic. The CI stubs are excluded:
+          # they never ship with the plugin.
+          if grep -rn --exclude-dir=.git --exclude-dir=.github '/opt/loxberry' .; then
+            echo "Hardcoded LoxBerry paths found - use the library variables or REPLACE* tags." >&2
+            exit 1
+          fi
+          echo "No hardcoded paths found."

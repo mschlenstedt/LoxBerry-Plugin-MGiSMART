@@ -1,0 +1,47 @@
+<div class="lb-content">
+
+<div id="gw-service"></div>
+
+<details class="lb-collapsible" open>
+	<summary style="font-size:1.15em; font-weight:700;"><TMPL_VAR MGISMART.CLOUD_HEADING></summary>
+	<div class="lb-collapsible-content">
+		<p style="color:var(--lb-text-muted); font-size:0.9rem; line-height:1.6; margin:0 0 16px;"><TMPL_VAR MGISMART.CLOUD_HINT></p>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label"><TMPL_VAR MGISMART.CLOUD_CONNECTION></label>
+			<div class="lb-form-field"><span id="cloud-online">…</span></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label"><TMPL_VAR MGISMART.CLOUD_LAST_LOGIN></label>
+			<div class="lb-form-field"><span id="cloud-lastlogin" style="font-family:var(--lb-font-mono)">…</span></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label"><TMPL_VAR MGISMART.CLOUD_LAST_ERROR></label>
+			<div class="lb-form-field"><span id="cloud-lasterror" style="font-family:var(--lb-font-mono)">…</span></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label"><TMPL_VAR MGISMART.CLOUD_GW_VERSION></label>
+			<div class="lb-form-field"><span id="cloud-gwversion" style="font-family:var(--lb-font-mono)">…</span></div>
+		</div>
+	</div>
+</details>
+
+<details class="lb-collapsible" open>
+	<summary style="font-size:1.15em; font-weight:700;"><TMPL_VAR MGISMART.TOPIC_HEADING></summary>
+	<div class="lb-collapsible-content">
+		<p style="color:var(--lb-text-muted); font-size:0.9rem; line-height:1.6; margin:0 0 16px;"><TMPL_VAR MGISMART.TOPIC_HINT></p>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label"><TMPL_VAR MGISMART.TOPIC_SUBSCRIBE></label>
+			<div class="lb-form-field"><span id="cloud-topic" style="font-family:var(--lb-font-mono); font-weight:700">…</span></div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.TOPIC_SUBSCRIBE_HELP></div>
+		</div>
+
+		<div class="lb-form-help" style="margin-top:1.2em;"><TMPL_VAR MGISMART.TOPIC_COMMANDS_HINT></div>
+	</div>
+</details>
+
+</div>

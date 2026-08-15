@@ -121,6 +121,13 @@ sub do_start
 		return 1;
 	}
 
+	my ($have_py, $need_py) = python_requirement_unmet();
+	if ($have_py) {
+		LOGERR("Python $have_py is too old: the gateway needs $need_py or newer. Debian 12 ('Bookworm') ships 3.11, Debian 13 ('Trixie') ships 3.13.");
+		print "Python $have_py is too old; the gateway needs $need_py or newer.\n";
+		return 1;
+	}
+
 	my $cfg = plugin_config();
 	if (!length(trim($cfg->{saic_user} // "")) || !length($cfg->{saic_password} // "")) {
 		LOGERR("No iSMART credentials configured. Enter them on the Settings tab.");
@@ -409,6 +416,38 @@ sub write_env_file
 	chmod(0600, $tmp);
 	return undef if (!rename($tmp, $env_file));
 	return \%env;
+}
+
+# The gateway declares a minimum Python version in its pyproject.toml. Checking
+# it before the start turns an unreadable ImportError traceback in the gateway
+# log into one clear line. preroot.sh and gateway_pkg.sh already refuse an
+# install on too old a Python; this catches the case where the interpreter
+# changes underneath an existing installation, e.g. after an OS upgrade.
+#
+# Returns (have, need) when the requirement is not met, and nothing otherwise -
+# including when either version cannot be determined, because a failed check
+# must never be a reason not to start.
+sub python_requirement_unmet
+{
+	open(my $fh, "<", "$gateway_dir/pyproject.toml") or return;
+	local $/;
+	my $raw = <$fh>;
+	close($fh);
+
+	my ($spec) = ($raw // "") =~ /requires-python\s*=\s*["']([^"']+)["']/;
+	return if (!$spec);
+	my ($need) = $spec =~ />=\s*(\d+\.\d+)/;
+	return if (!$need);
+
+	my $have = `$venv_python -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null`;
+	$have = "" if (!defined($have));
+	chomp($have);
+	return if ($have !~ /\A\d+\.\d+\z/);
+
+	my ($hmaj, $hmin) = split(/\./, $have);
+	my ($nmaj, $nmin) = split(/\./, $need);
+	return ($have, $need) if ($hmaj < $nmaj || ($hmaj == $nmaj && $hmin < $nmin));
+	return;
 }
 
 ##############################################################################

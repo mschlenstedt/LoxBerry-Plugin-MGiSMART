@@ -222,7 +222,7 @@ available_version()
 # a new venv instead of upgrading the existing one in place.
 build_new()
 {
-	local channel rel tarball tmptar reqs
+	local channel rel tarball tmptar reqs req have
 
 	channel="$(update_channel)"
 	echo "<INFO> Update channel: $channel"
@@ -270,6 +270,39 @@ build_new()
 		echo "<ERROR> The unpacked release has no src/main.py - unexpected layout"
 		rm -rf "$GATEWAY_DIR.new"
 		return 4
+	fi
+
+	# The gateway declares its own minimum Python version, so a release raising
+	# that requirement is caught here instead of at the first import. Checked
+	# before anything is built and long before the switch-over, so a refused
+	# update leaves the running installation completely untouched.
+	#
+	# pip cannot do this for us: we only install the dependencies, never the
+	# project itself, and the dependencies carry no such requirement.
+	req="$(python3 - "$GATEWAY_DIR.new/pyproject.toml" <<'EOF' 2>/dev/null
+import re, sys, tomllib
+try:
+    with open(sys.argv[1], "rb") as fh:
+        data = tomllib.load(fh)
+except Exception:
+    raise SystemExit(0)
+m = re.search(r">=\s*(\d+\.\d+)", data.get("project", {}).get("requires-python", ""))
+if m:
+    print(m.group(1))
+EOF
+)"
+	if [ -n "$req" ] && ! python3 -c "
+import sys
+r = tuple(int(p) for p in '$req'.split('.'))
+sys.exit(0 if sys.version_info[:len(r)] >= r else 1)
+" 2>/dev/null
+	then
+		have="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)"
+		echo "<ERROR> saic-python-mqtt-gateway $NEW_VERSION needs Python $req or newer, but this system has $have."
+		echo "<ERROR> Debian 12 ('Bookworm') ships Python 3.11; Debian 13 ('Trixie') ships 3.13."
+		echo "<ERROR> Nothing was changed - the existing installation is still in place."
+		rm -rf "$GATEWAY_DIR.new"
+		return 5
 	fi
 
 	echo "<INFO> Creating the Python environment"

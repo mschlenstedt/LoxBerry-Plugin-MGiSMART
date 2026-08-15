@@ -7,8 +7,19 @@ The plugin does not talk to the vehicle itself. It installs and operates **[saic
 ## Requirements
 
 - LoxBerry 4.0.0 or newer
+- **Python 3.12 or newer**, which in practice means a LoxBerry on **Debian 13 ("Trixie")**. Debian 12 ("Bookworm") ships Python 3.11 and is not sufficient — see below.
 - An iSMART account with the vehicle registered to it (create it in the iSMART app)
 - The LoxBerry MQTT broker and MQTT Gateway
+
+### Why Python 3.12
+
+`saic-python-mqtt-gateway` declares `requires-python >= 3.12` and uses language features such as `typing.override` that do not exist before it. That requirement is invisible to `pip`, because the plugin installs only the gateway's *dependencies* and none of those need 3.12 — so on Debian 12 everything would install without a single error and the gateway would then die on its first import.
+
+The plugin therefore checks the requirement itself, and reads it from the gateway's own `pyproject.toml` rather than hardcoding a number, so a future release raising it is picked up automatically:
+
+- `preroot.sh` refuses the installation before anything is copied, with a message naming the required and the found version.
+- `bin/gateway_pkg.sh` re-checks after unpacking a release, before building anything. A gateway update that would need a newer Python is refused and the running installation stays untouched.
+- `bin/watchdog.pl` checks before each start, so an interpreter that changed underneath an existing installation produces one clear log line instead of a traceback.
 
 ## What the plugin does
 

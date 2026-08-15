@@ -1,0 +1,18 @@
+# The plugin runs on LoxBerry (Linux). CRLF breaks shebang lines in shell
+# scripts, Perl CGIs and the Python entry point, so everything is stored and
+# checked out with LF - regardless of the editing OS.
+* text=auto eol=lf
+
+# Files LoxBerry executes directly. Several of them have no extension
+# (daemon, cron.*, healthcheck, uninstall), so the rule above is what covers
+# them; these are listed for clarity and belt-and-braces.
+*.pl  text eol=lf
+*.pm  text eol=lf
+*.cgi text eol=lf
+*.sh  text eol=lf
+*.py  text eol=lf
+
+# Exclude development-only files from the GitHub source archive that LoxBerry
+# installs. (docs/ is not listed here because it is not tracked at all - see
+# .gitignore; the working documents stay on the development machine.)
+.github/ export-ignore

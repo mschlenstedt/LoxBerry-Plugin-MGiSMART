@@ -1,0 +1,8 @@
+# Working documents stay on the development machine and are never published.
+docs/
+
+# Editor and OS leftovers
+*.swp
+*~
+.DS_Store
+Thumbs.db

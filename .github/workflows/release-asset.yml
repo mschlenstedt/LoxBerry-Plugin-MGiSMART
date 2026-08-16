@@ -94,11 +94,15 @@ jobs:
             exit 1
           fi
 
+          # Created as a draft first, so a failed upload never leaves a
+          # half-published release behind, then flipped to a normal, latest
+          # release: these tags are stable versions. (The plugin this workflow
+          # was adapted from publishes everything as a prerelease; that would
+          # label a 1.0 "Pre-release" on the release page.)
           gh release create "$tag" "$zip" \
             --draft \
-            --prerelease \
             --verify-tag \
             --title "MG iSMART V$version" \
             --notes-file "$notes"
 
-          gh release edit "$tag" --draft=false --prerelease
+          gh release edit "$tag" --draft=false --latest

@@ -49,19 +49,41 @@ if ! python3 -c "import venv" >/dev/null 2>&1; then
 		|| echo "<WARNING> Could not install python3-venv. The gateway installation will fail."
 fi
 
+# An upgrade that died between preupgrade.sh and postupgrade.sh leaves the old
+# installation sitting in the stash. Recover it rather than throwing away a
+# working gateway and 100+ MB of interpreter; if the live directory is fine
+# already, the stash is stale and goes.
+DATA_STASH="$ARGV5/data/plugins/.$ARGV3.upgrade"
+if [ -d "$DATA_STASH" ]; then
+	if su loxberry -c "$PKG installed" 2>/dev/null; then
+		echo "<INFO> Discarding a stale upgrade backup."
+		rm -rf "$DATA_STASH"
+	else
+		echo "<INFO> Recovering the gateway installation from an interrupted upgrade."
+		mkdir -p "$DATADIR"
+		for entry in "$DATA_STASH"/* "$DATA_STASH"/.[!.]*; do
+			[ -e "$entry" ] || continue
+			rm -rf "$DATADIR/$(basename "$entry")"
+			mv "$entry" "$DATADIR/" || true
+		done
+		rm -rf "$DATA_STASH"
+		chown -R loxberry:loxberry "$DATADIR"
+	fi
+fi
+
 # The gateway installation happens LAST, and that placement is deliberate.
 #
-# plugininstall.pl runs preroot, preupgrade, preinstall, copies the files, then
-# postinstall, postupgrade and finally postroot. Anything installed before
-# postupgrade could be overwritten by what postupgrade restores from its backup,
-# so this is the only point at which an installation is safe from that.
+# plugininstall.pl runs preroot, preupgrade, then purge_installation() which
+# deletes config/, bin/, data/, templates/ and webfrontend/ of this plugin, then
+# preinstall, copies the files, postinstall, postupgrade and finally postroot.
+# preupgrade.sh moves config and data out of the purge's way and postupgrade.sh
+# moves them back, so anything installed earlier than this point would either be
+# purged or overwritten by that restore.
 #
-# Only install when there is nothing usable. This runs on every plugin upgrade
-# too, and re-downloading the release and rebuilding the venv each time would
-# add minutes to an upgrade for no reason - the core never deletes data/, it
-# only copies over what the archive itself ships, and this plugin ships no
-# data/ at all, so an existing installation survives untouched. Updating the
-# gateway is a separate, deliberate action on the Update tab.
+# Only install when there is nothing usable. Thanks to the stash the previous
+# installation normally survives an upgrade, so this does not re-download the
+# release and rebuild the venv every time. Updating the gateway is a separate,
+# deliberate action on the Update tab.
 #
 # "installed" is not a mere file check: it runs the venv's interpreter and
 # verifies it still satisfies the gateway's requires-python. A venv whose base

@@ -1,41 +1,45 @@
 #!/bin/sh
 
-# Runs as loxberry before an upgrade, right after preroot and before the plugin
-# files are replaced.
+# Runs as loxberry before an upgrade, right after preroot.
 #
-# Saves config and log, which postupgrade.sh restores.
+# Immediately after this script, plugininstall.pl calls purge_installation(),
+# which deletes config/, bin/, data/, templates/ and webfrontend/ of this plugin
+# before the new files are copied in. For this plugin that would take out the
+# whole gateway installation: the unpacked release, the venv, and possibly a
+# private CPython of over 100 MB - all of which would then have to be downloaded
+# and rebuilt on every single plugin upgrade.
 #
-# This is insurance, not a necessity today. plugininstall.pl does not delete
-# config/ or data/: it creates the directory and then copies over only what the
-# archive itself ships (see the "Copy Config files" and "Copy Data files"
-# blocks). This plugin ships neither, so both survive an upgrade untouched. The
-# backup exists so that stays true if a later version starts shipping config
-# defaults.
+# So config/ and data/ are moved aside here and moved back by postupgrade.sh.
 #
-# data/ is deliberately NOT backed up. It holds the gateway, the venv and
-# possibly a private Python - together well over 100 MB - and /tmp on LoxBerry
-# is a tmpfs, so copying that would eat RAM on small machines to protect
-# against something the core does not do anyway.
+# MOVED, not copied. purge_installation() removes exactly
+# "<...>/plugins/<folder>/", so a sibling directory next to it survives
+# untouched. A rename within the same filesystem is instant and costs nothing,
+# whereas copying into /tmp would be both slow and dangerous - /tmp is a tmpfs
+# on LoxBerry, and the gateway data would have to fit into RAM.
 #
-# The gateway itself is stopped so it does not keep running against files that
-# are about to be replaced; postroot.sh starts it again at the end.
+# log/ is not saved: purge_installation() only deletes the log folder when
+# called with "all", which happens on uninstall, not on upgrade.
 #
 # We add 5 arguments when executing the script:
 # command <TEMPFOLDER> <NAME> <FOLDER> <VERSION> <BASEFOLDER>
 
-ARGV1=$1
 ARGV3=$3
 ARGV5=$5
 
 WATCHDOG="$ARGV5/bin/plugins/$ARGV3/watchdog.pl"
-BACKUP="/tmp/${ARGV1}_upgrade"
+
+CONFIGDIR="$ARGV5/config/plugins/$ARGV3"
+DATADIR="$ARGV5/data/plugins/$ARGV3"
+# A leading dot keeps these out of the way of plugin folder names, which are
+# always plain lowercase.
+CONFIG_STASH="$ARGV5/config/plugins/.$ARGV3.upgrade"
+DATA_STASH="$ARGV5/data/plugins/.$ARGV3.upgrade"
 
 if [ -x "$WATCHDOG" ]; then
 	echo "<INFO> Stopping the gateway for the upgrade"
-	# --action=restart stops without setting the manual stop marker, so an
-	# upgrade does not look like a deliberate stop afterwards. There is no
-	# separate "stop without marker" action, so the process is ended through the
-	# watchdog's own probe.
+	# Ended through the watchdog's own probe rather than --action=stop, which
+	# would set the manual stop marker and make the upgrade look like a
+	# deliberate stop afterwards.
 	PID=$("$WATCHDOG" --action=pid 2>/dev/null | tr -dc '0-9')
 	if [ -n "$PID" ]; then
 		kill -TERM "$PID" 2>/dev/null
@@ -48,16 +52,17 @@ if [ -x "$WATCHDOG" ]; then
 	fi
 fi
 
-echo "<INFO> Creating temporary folders for upgrading"
-mkdir -p "$BACKUP/config"
-mkdir -p "$BACKUP/log"
+# Leftovers from an upgrade that did not finish would otherwise shadow this run.
+rm -rf "$CONFIG_STASH" "$DATA_STASH"
 
-echo "<INFO> Backing up existing config files"
-cp -r "$ARGV5/config/plugins/$ARGV3/" "$BACKUP/config" 2>/dev/null \
-	|| echo "<INFO> No existing configuration to back up"
+if [ -d "$CONFIGDIR" ]; then
+	echo "<INFO> Setting the configuration aside"
+	mv "$CONFIGDIR" "$CONFIG_STASH" || echo "<WARNING> Could not set the configuration aside"
+fi
 
-echo "<INFO> Backing up existing log files"
-cp -r "$ARGV5/log/plugins/$ARGV3/" "$BACKUP/log" 2>/dev/null \
-	|| echo "<INFO> No existing log files to back up"
+if [ -d "$DATADIR" ]; then
+	echo "<INFO> Setting the gateway installation aside"
+	mv "$DATADIR" "$DATA_STASH" || echo "<WARNING> Could not set the gateway installation aside"
+fi
 
 exit 0

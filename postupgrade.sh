@@ -1,43 +1,52 @@
 #!/bin/sh
 
 # Runs as loxberry after an upgrade, once the new plugin files are in place.
-# Restores what preupgrade.sh saved. postroot.sh runs after this one and takes
-# care of permissions, of reinstalling the gateway if it went missing, and of
-# starting it again.
+# Moves back what preupgrade.sh set aside before purge_installation() wiped the
+# plugin's config and data directories.
+#
+# postroot.sh runs after this one and takes care of permissions, of reinstalling
+# the gateway should the restore have failed, and of starting it again.
 #
 # We add 5 arguments when executing the script:
 # command <TEMPFOLDER> <NAME> <FOLDER> <VERSION> <BASEFOLDER>
 
-ARGV1=$1
 ARGV3=$3
 ARGV5=$5
 
-BACKUP="/tmp/${ARGV1}_upgrade"
 CONFIGDIR="$ARGV5/config/plugins/$ARGV3"
-LOGDIR="$ARGV5/log/plugins/$ARGV3"
+DATADIR="$ARGV5/data/plugins/$ARGV3"
+CONFIG_STASH="$ARGV5/config/plugins/.$ARGV3.upgrade"
+DATA_STASH="$ARGV5/data/plugins/.$ARGV3.upgrade"
 
-echo "<INFO> Copy back existing config files"
-if [ -d "$BACKUP/config/$ARGV3" ]; then
-	mkdir -p "$CONFIGDIR"
-	# The dot makes cp copy the hidden files too - the generated .env among them.
-	cp -r "$BACKUP/config/$ARGV3/." "$CONFIGDIR/" \
-		|| echo "<WARNING> Could not restore the configuration"
-else
-	echo "<INFO> No configuration backup found"
-fi
+# Moves every entry back, overwriting whatever the archive shipped under the
+# same name - the user's own configuration wins over a packaged default. Entries
+# are moved one by one rather than the directory as a whole, because the core
+# has already recreated the target and may have copied files into it.
+#
+# The globs cover dotfiles too: the generated .env lives in the config directory.
+restore_stash()
+{
+	stash="$1"
+	target="$2"
+	label="$3"
 
-echo "<INFO> Copy back existing log files"
-if [ -d "$BACKUP/log/$ARGV3" ]; then
-	mkdir -p "$LOGDIR"
-	for logfile in "$BACKUP/log/$ARGV3"/*; do
-		[ -e "$logfile" ] || continue
-		target="$LOGDIR/$(basename "$logfile")"
-		rm -rf "$target"
-		cp -r "$logfile" "$LOGDIR/" || echo "<WARNING> Could not restore log file $logfile"
+	[ -d "$stash" ] || return 0
+
+	echo "<INFO> Restoring $label"
+	mkdir -p "$target"
+
+	for entry in "$stash"/* "$stash"/.[!.]* "$stash"/..?*; do
+		[ -e "$entry" ] || continue
+		name=$(basename "$entry")
+		rm -rf "$target/$name"
+		mv "$entry" "$target/$name" || echo "<WARNING> Could not restore $name"
 	done
-fi
 
-echo "<INFO> Remove temporary folders"
-rm -rf "$BACKUP"
+	rmdir "$stash" 2>/dev/null || rm -rf "$stash"
+	return 0
+}
+
+restore_stash "$CONFIG_STASH" "$CONFIGDIR" "the configuration"
+restore_stash "$DATA_STASH" "$DATADIR" "the gateway installation"
 
 exit 0

@@ -49,13 +49,30 @@ if ! python3 -c "import venv" >/dev/null 2>&1; then
 		|| echo "<WARNING> Could not install python3-venv. The gateway installation will fail."
 fi
 
-# Only install when there is nothing usable yet. This script also runs on every
-# plugin upgrade, and re-downloading the release and rebuilding the venv each
-# time would add several minutes to an upgrade for no reason. Updating the
+# The gateway installation happens LAST, and that placement is deliberate.
+#
+# plugininstall.pl runs preroot, preupgrade, preinstall, copies the files, then
+# postinstall, postupgrade and finally postroot. Anything installed before
+# postupgrade could be overwritten by what postupgrade restores from its backup,
+# so this is the only point at which an installation is safe from that.
+#
+# Only install when there is nothing usable. This runs on every plugin upgrade
+# too, and re-downloading the release and rebuilding the venv each time would
+# add minutes to an upgrade for no reason - the core never deletes data/, it
+# only copies over what the archive itself ships, and this plugin ships no
+# data/ at all, so an existing installation survives untouched. Updating the
 # gateway is a separate, deliberate action on the Update tab.
+#
+# "installed" is not a mere file check: it runs the venv's interpreter and
+# verifies it still satisfies the gateway's requires-python. A venv whose base
+# interpreter disappeared, or one left behind by an OS downgrade, therefore
+# ends up being rebuilt instead of being reported as fine.
 if [ -x "$PKG" ]; then
 	if su loxberry -c "$PKG installed"; then
-		echo "<INFO> saic-python-mqtt-gateway is already installed - keeping it."
+		echo "<INFO> saic-python-mqtt-gateway is already installed and usable - keeping it."
+		# Tidy up interpreters no longer referenced by the venv, e.g. left over
+		# from an earlier gateway release that needed a different Python.
+		su loxberry -c "$PKG prune" || true
 	else
 		echo "<INFO> Installing saic-python-mqtt-gateway. This takes a few minutes."
 		if su loxberry -c "$PKG install"; then

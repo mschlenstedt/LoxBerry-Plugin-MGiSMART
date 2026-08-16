@@ -433,6 +433,83 @@ prune_pythons()
 	return 0
 }
 
+# The interpreter the installed venv was built against, taken from its
+# pyvenv.cfg. Used to prune orphans without having just built anything.
+venv_base_python()
+{
+	local home
+	[ -f "$VENV_DIR/pyvenv.cfg" ] || return 0
+	home="$(sed -n 's/^[[:space:]]*home[[:space:]]*=[[:space:]]*//p' "$VENV_DIR/pyvenv.cfg" | head -1)"
+	[ -n "$home" ] || return 0
+	echo "$home/python3"
+}
+
+# Whether the installation is not just present but actually usable: the gateway
+# source is there, and the venv's interpreter runs AND still satisfies the
+# gateway's requires-python.
+#
+# Checking for files alone is not enough. A venv keeps the path of its base
+# interpreter in pyvenv.cfg, so it turns into an elaborate pile of dangling
+# symlinks the moment that interpreter goes away - and an interpreter that
+# merely became too old passes every file test while the gateway cannot start.
+# Both cases have to end up reinstalling rather than being reported as fine.
+installation_ok()
+{
+	local req reqmax
+
+	[ -f "$GATEWAY_DIR/src/main.py" ] || return 1
+	[ -x "$VENV_DIR/bin/python" ] || return 1
+	"$VENV_DIR/bin/python" -c 'pass' >/dev/null 2>&1 || return 1
+
+	read -r req reqmax <<-EOF
+	$(requires_python_of "$GATEWAY_DIR/pyproject.toml")
+	EOF
+
+	# No requirement readable: the interpreter runs, that has to do.
+	[ -n "${req:-}" ] || return 0
+
+	python_satisfies "$VENV_DIR/bin/python" "$req" "${reqmax:-}"
+}
+
+# Prints "<min> <max>" from a pyproject.toml, max possibly empty.
+requires_python_of()
+{
+	python3 - "$1" <<'EOF' 2>/dev/null
+import re, sys, tomllib
+try:
+    with open(sys.argv[1], "rb") as fh:
+        data = tomllib.load(fh)
+except Exception:
+    raise SystemExit(0)
+spec = data.get("project", {}).get("requires-python", "")
+lo = re.search(r">=\s*(\d+\.\d+)", spec)
+hi = re.search(r"<\s*(\d+\.\d+)", spec)
+if lo:
+    print(lo.group(1), hi.group(1) if hi else "")
+EOF
+}
+
+# Removes leftovers from an interrupted run. An install that died between
+# building and activating leaves .new directories behind; without this they
+# would be silently reused or just waste space.
+cleanup_stale()
+{
+	local dir
+	for dir in "$GATEWAY_DIR.new" "$VENV_DIR.new" "$GATEWAY_DIR.old" "$VENV_DIR.old"; do
+		if [ -e "$dir" ]; then
+			echo "<INFO> Removing a leftover $(basename "$dir") from an interrupted run."
+			rm -rf "$dir"
+		fi
+	done
+	if [ -d "$PYTHON_ROOT" ]; then
+		for dir in "$PYTHON_ROOT"/*.tmp; do
+			[ -e "$dir" ] || continue
+			rm -rf "$dir"
+		done
+	fi
+	return 0
+}
+
 ##############################################################################
 # Install
 ##############################################################################
@@ -443,7 +520,9 @@ prune_pythons()
 # a new venv instead of upgrading the existing one in place.
 build_new()
 {
-	local channel rel tarball tmptar reqs reqwin req reqmax
+	local channel rel tarball tmptar reqs req reqmax
+
+	cleanup_stale
 
 	channel="$(update_channel)"
 	echo "<INFO> Update channel: $channel"
@@ -500,23 +579,11 @@ build_new()
 	# pip cannot do this for us: we only install the dependencies, never the
 	# project itself, and the dependencies carry no such requirement - which is
 	# exactly why a too-old Python installs cleanly and only fails at runtime.
-	reqwin="$(python3 - "$GATEWAY_DIR.new/pyproject.toml" <<'EOF' 2>/dev/null
-import re, sys, tomllib
-try:
-    with open(sys.argv[1], "rb") as fh:
-        data = tomllib.load(fh)
-except Exception:
-    raise SystemExit(0)
-spec = data.get("project", {}).get("requires-python", "")
-lo = re.search(r">=\s*(\d+\.\d+)", spec)
-hi = re.search(r"<\s*(\d+\.\d+)", spec)
-if lo:
-    print("%s|%s" % (lo.group(1), hi.group(1) if hi else ""))
-EOF
-)"
-	req="${reqwin%%|*}"
-	reqmax="${reqwin#*|}"
-	[ "$reqwin" = "$req" ] && reqmax=""
+	read -r req reqmax <<-EOF
+	$(requires_python_of "$GATEWAY_DIR.new/pyproject.toml")
+	EOF
+	req="${req:-}"
+	reqmax="${reqmax:-}"
 
 	if [ -z "$req" ]; then
 		echo "<WARNING> Could not read requires-python; building with the system Python."
@@ -716,8 +783,11 @@ case "$ACTION" in
 		update_channel
 		;;
 	installed)
-		[ -x "$VENV_DIR/bin/python" ] && [ -f "$GATEWAY_DIR/src/main.py" ]
+		installation_ok
 		exit $?
+		;;
+	prune)
+		prune_pythons "$(venv_base_python)"
 		;;
 	install)
 		install_gateway
@@ -728,7 +798,7 @@ case "$ACTION" in
 		exit $?
 		;;
 	*)
-		echo "Usage: $0 current|available [force]|channel|installed|install|upgrade"
+		echo "Usage: $0 current|available [force]|channel|installed|prune|install|upgrade"
 		exit 2
 		;;
 esac

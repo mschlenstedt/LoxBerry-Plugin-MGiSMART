@@ -3,9 +3,19 @@
 # Runs as loxberry before an upgrade, right after preroot and before the plugin
 # files are replaced.
 #
-# LoxBerry reinstalls the config directory from the archive, which would wipe
-# the iSMART credentials, the recorded gateway version and the manual stop
-# marker. They are saved here and restored by postupgrade.sh.
+# Saves config and log, which postupgrade.sh restores.
+#
+# This is insurance, not a necessity today. plugininstall.pl does not delete
+# config/ or data/: it creates the directory and then copies over only what the
+# archive itself ships (see the "Copy Config files" and "Copy Data files"
+# blocks). This plugin ships neither, so both survive an upgrade untouched. The
+# backup exists so that stays true if a later version starts shipping config
+# defaults.
+#
+# data/ is deliberately NOT backed up. It holds the gateway, the venv and
+# possibly a private Python - together well over 100 MB - and /tmp on LoxBerry
+# is a tmpfs, so copying that would eat RAM on small machines to protect
+# against something the core does not do anyway.
 #
 # The gateway itself is stopped so it does not keep running against files that
 # are about to be replaced; postroot.sh starts it again at the end.

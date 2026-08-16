@@ -1,0 +1,19 @@
+{
+   "MAIN" : {
+      "account_refresh_interval" : "",
+      "battery_capacity_mapping" : "",
+      "charge_min_percentage" : "",
+      "extra_env" : "",
+      "ha_discovery_enabled" : 0,
+      "messages_request_interval" : "",
+      "mqtt_allow_dots_in_topic" : 0,
+      "mqtt_topic" : "saic",
+      "saic_password" : "",
+      "saic_phone_country_code" : "",
+      "saic_region" : "eu",
+      "saic_relogin_delay" : "",
+      "saic_user" : "",
+      "saic_user_timezone" : "",
+      "update_channel" : "release"
+   }
+}

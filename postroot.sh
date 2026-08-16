@@ -113,7 +113,9 @@ fi
 # manual stop is remembered in the config directory and survives the upgrade.
 if [ -x "$WATCHDOG" ] && [ -f "$CONFIGDIR/pluginconfig.json" ]; then
 	if [ -e "$CONFIGDIR/gateway_stopped.cfg" ]; then
-		echo "<INFO> The gateway was stopped manually - not starting it."
+		# Either the user stopped it, or this is a fresh installation - the
+		# archive ships the flag so an unconfigured gateway does not start.
+		echo "<INFO> Stop flag is set - not starting the gateway. Configure it on the plugin page and start it there."
 	else
 		su loxberry -c "$WATCHDOG --action=restart" >/dev/null 2>&1 \
 			&& echo "<INFO> Gateway started." \

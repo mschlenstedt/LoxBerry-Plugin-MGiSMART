@@ -46,7 +46,29 @@ restore_stash()
 	return 0
 }
 
+# Whether the user had the gateway stopped, decided BEFORE the stash is consumed.
+#
+# The archive ships config/gateway_stopped.cfg so a fresh installation does not
+# start an unconfigured gateway. On an upgrade the core copies that file in as
+# well, which would stop a gateway that was happily running. The stash is the
+# authority on what the user actually wanted, so the flag is reconciled against
+# it below rather than being left to whichever copy landed last.
+if [ -d "$CONFIG_STASH" ]; then
+	HAD_STASH=1
+	[ -e "$CONFIG_STASH/gateway_stopped.cfg" ] && WAS_STOPPED=1 || WAS_STOPPED=0
+else
+	HAD_STASH=0
+	WAS_STOPPED=0
+fi
+
 restore_stash "$CONFIG_STASH" "$CONFIGDIR" "the configuration"
 restore_stash "$DATA_STASH" "$DATADIR" "the gateway installation"
+
+if [ "$HAD_STASH" = "1" ] && [ "$WAS_STOPPED" = "0" ]; then
+	if [ -e "$CONFIGDIR/gateway_stopped.cfg" ]; then
+		echo "<INFO> The gateway was running before the upgrade - clearing the packaged stop flag"
+		rm -f "$CONFIGDIR/gateway_stopped.cfg"
+	fi
+fi
 
 exit 0

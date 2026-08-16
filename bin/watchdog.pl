@@ -264,6 +264,14 @@ sub do_check
 		LOGOK("The gateway is not installed. Nothing to do.");
 		return 0;
 	}
+	# Nothing to supervise before the plugin has been set up. Without this the
+	# cron check would fail a start every five minutes on a freshly installed
+	# plugin and fill the log with errors about missing credentials.
+	my $cfg = plugin_config();
+	if (!length(mg_trim($cfg->{saic_user} // "")) || !length($cfg->{saic_password} // "")) {
+		LOGOK("No iSMART account configured yet. Nothing to do.");
+		return 0;
+	}
 	if (gateway_running()) {
 		reset_failures();
 		LOGOK("The gateway is running.");

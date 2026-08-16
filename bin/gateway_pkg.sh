@@ -303,26 +303,36 @@ hi_t = tuple(int(p) for p in hi.split(".")) if hi else None
 with open(path, encoding="utf-8") as fh:
     data = json.load(fh)
 
+# "install_only_stripped" is the same interpreter without debug symbols: a
+# third of the download and a fraction of the space once unpacked, which
+# matters on an SD card. Older releases only carry "install_only", so both are
+# collected and the stripped one preferred per version.
 pat = re.compile(
-    r"^cpython-(\d+)\.(\d+)\.(\d+)\+\d+-" + re.escape(arch) + r"-install_only\.tar\.gz$"
+    r"^cpython-(\d+)\.(\d+)\.(\d+)\+\d+-"
+    + re.escape(arch)
+    + r"-install_only(_stripped)?\.tar\.gz$"
 )
-best = None
+found = {}
 for asset in data.get("assets", []):
     m = pat.match(asset.get("name", ""))
     if not m:
         continue
-    ver = tuple(int(g) for g in m.groups())
+    ver = tuple(int(g) for g in m.groups()[:3])
     if ver[: len(lo_t)] < lo_t:
         continue
     if hi_t and ver[: len(hi_t)] >= hi_t:
         continue
-    # lowest series, newest patch within it
-    key = (ver[0], ver[1], -ver[2])
-    if best is None or key < best[0]:
-        best = (key, ver, asset.get("browser_download_url", ""))
+    url = asset.get("browser_download_url", "")
+    if not url:
+        continue
+    slot = found.setdefault(ver, {})
+    slot["stripped" if m.group(4) else "full"] = url
 
-if best and best[2]:
-    print("%d.%d.%d|%s" % (best[1][0], best[1][1], best[1][2], best[2]))
+if found:
+    # lowest series, newest patch within it
+    ver = min(found, key=lambda v: (v[0], v[1], -v[2]))
+    url = found[ver].get("stripped") or found[ver].get("full")
+    print("%d.%d.%d|%s" % (ver[0], ver[1], ver[2], url))
 EOF
 )"
 	rm -f "$relfile"

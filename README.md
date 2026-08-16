@@ -21,7 +21,7 @@ That requirement is invisible to `pip`, because the plugin installs only the gat
 
 **On Debian 13 nothing special happens:** the system Python is used, and no extra runtime is installed.
 
-**On Debian 12** the plugin installs a private CPython below its own data directory, from [python-build-standalone](https://github.com/astral-sh/python-build-standalone) — the same prebuilt interpreters `uv` uses. Nothing is compiled, the system Python is not touched, no apt source is added, and uninstalling the plugin removes the interpreter with it. It costs one extra download of roughly 30 MB at install time.
+**On Debian 12** the plugin installs a private CPython below its own data directory, from [python-build-standalone](https://github.com/astral-sh/python-build-standalone) — the same prebuilt interpreters `uv` uses. Nothing is compiled, the system Python is not touched, no apt source is added, and uninstalling the plugin removes the interpreter with it. It costs one extra download of roughly 33 MB at install time and about 90 MB of disk.
 
 The required version is always read from the gateway's own `pyproject.toml` rather than hardcoded, so a future release raising it carries over by itself. It is enforced at three points:
 

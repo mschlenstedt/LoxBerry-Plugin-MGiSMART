@@ -6,7 +6,7 @@ The plugin does not talk to the vehicle itself. It installs and operates **[saic
 
 ## Documentation
 
-- [LoxBerry Wiki (user documentation)](https://wiki.loxberry.de/plugins/mgismart)
+- [LoxBerry Wiki (user documentation)](https://wiki.loxberry.de/plugins/mgismart/start)
 
 ## Requirements
 
@@ -66,7 +66,7 @@ The gateway publishes below `<prefix>/<iSMART user>/…`, by default with the pr
 
 MQTT Gateway V2 **discovers those topics by itself** — nothing has to be entered anywhere. Open its *Subscriptions* page, find the group and tick the individual datapoints you want forwarded to the Miniserver. Which ones those are is your decision, so the plugin deliberately does not touch that configuration.
 
-Commands to the vehicle are sent on topics ending in `/set` below the same prefix — locking, climate, charging, and so on. They are documented in the [plugin wiki](https://wiki.loxberry.de/plugins/mgismart). Build your Loxone virtual outputs from those.
+Commands to the vehicle are sent on topics ending in `/set` below the same prefix — locking, climate, charging, and so on. They are documented in the [plugin wiki](https://wiki.loxberry.de/plugins/mgismart/start). Build your Loxone virtual outputs from those.
 
 ## Licence
 

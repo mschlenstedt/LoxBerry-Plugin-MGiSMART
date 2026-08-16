@@ -16,7 +16,19 @@
 		".gwsvc-btn{display:inline-flex;align-items:center;gap:8px;background:#f6f6f6;border:1px solid #ddd;border-radius:5px;padding:6px 12px;color:#333;font-size:12.5px;font-weight:bold;line-height:1;text-decoration:none;cursor:pointer;}" +
 		".gwsvc-btn:hover{background:#ededed;}" +
 		".gwsvc-ico{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:50%;background:rgba(0,0,0,.3);color:#fff;font-size:12px;}" +
-		".lb-form-label{white-space:nowrap;}";
+		".lb-form-label{white-space:nowrap;}" +
+		// Warning box. Deliberately loud: it is about commanding a car and
+		// exposing its position, so it must not read as a decorative hint.
+		".mgi-warning{background:#fdecea;border:1px solid #d0021b;border-left:6px solid #d0021b;" +
+			"border-radius:5px;padding:12px 16px;margin:0 0 20px;color:#5c1210;text-shadow:none;" +
+			"font-size:0.9rem;line-height:1.55;}" +
+		".mgi-warning p{margin:0 0 8px;}" +
+		".mgi-warning p:last-child{margin-bottom:0;}" +
+		".mgi-warning-title{font-weight:700;color:#d0021b;text-transform:uppercase;letter-spacing:.02em;}" +
+		".mgi-pin{max-width:420px;margin:0 auto;padding:16px;border:1px solid var(--lb-border,#ccc);" +
+			"border-radius:5px;text-align:center;}" +
+		".mgi-pin-row{display:flex;gap:8px;align-items:center;margin:10px 0;}" +
+		".mgi-pin-row .lb-input{flex:1;min-width:0;}";
 	var style = document.createElement("style");
 	style.textContent = css;
 	document.head.appendChild(style);
@@ -39,9 +51,15 @@ $(function() {
 		window.setInterval(cloudStatus, 15000);
 	}
 
-	// Settings tab.
-	if (document.getElementById("settings-form")) {
-		setLoad();
+	// Settings tab: locked behind the SecurePIN, so nothing is loaded until it
+	// has been accepted.
+	if (document.getElementById("securepin_block")) {
+		$("#check_securepin").click(mgiCheckPin);
+		// The same session key the core's own pages use, so entering the PIN
+		// once unlocks all of them for this browser session.
+		$("#securepin").val(sessionStorage.getItem("securePIN") || "");
+		if ($("#securepin").val()) { mgiCheckPin(); }
+		else { $("#securepin_block").fadeIn(); }
 	}
 
 	// Update tab.
@@ -265,6 +283,55 @@ function cloudStatus() {
 		.fail(function() { cloudSet("#cloud-online", cloudText.NOANSWER, "#f5a623"); });
 }
 
+// ================================================================ SECUREPIN
+
+var pinMsg = {
+	WAIT:    "<TMPL_VAR MGISMART.PIN_CHECKING>",
+	WRONG:   "<TMPL_VAR MGISMART.PIN_WRONG>",
+	LOCKED:  "<TMPL_VAR MGISMART.PIN_LOCKED>",
+	FAILED:  "<TMPL_VAR MGISMART.PIN_FAILED>"
+};
+
+// The accepted PIN for this page. Every request that touches the configuration
+// carries it, because ajax.cgi verifies it again server-side.
+var mgiPin = null;
+
+function mgiPinKeyPress(event) {
+	event = event || window.event;
+	if (event.keyCode === 13) { $("#check_securepin").click(); return false; }
+	return true;
+}
+
+function mgiCheckPin() {
+	var pin = $("#securepin").val();
+	if (!pin) { return; }
+	$("#check_securepin").prop("disabled", true);
+	$("#check_hint").css("color", "#2274c6").text(pinMsg.WAIT);
+
+	$.ajax({ url: "ajax.cgi", type: "POST", dataType: "json", data: { action: "checksecpin", secpin: pin } })
+		.done(function(data) {
+			if (!data || data.error) {
+				// 3 means the core locked the PIN after repeated failures; saying
+				// so avoids the user hammering a PIN that cannot succeed yet.
+				var msg = (data && data.error === 3) ? pinMsg.LOCKED : pinMsg.WRONG;
+				$("#check_hint").css("color", "#c0392b").text(msg);
+				sessionStorage.removeItem("securePIN");
+				$("#securepin_block").fadeIn();
+				return;
+			}
+			mgiPin = pin;
+			sessionStorage.setItem("securePIN", pin);
+			$("#check_hint").html("&nbsp;");
+			$("#securepin_block").fadeOut(function() { $("#main_content").fadeIn(); });
+			setLoad();
+		})
+		.fail(function() {
+			$("#check_hint").css("color", "#c0392b").text(pinMsg.FAILED);
+			$("#securepin_block").fadeIn();
+		})
+		.always(function() { $("#check_securepin").prop("disabled", false); });
+}
+
 // ============================================================= SETTINGS TAB
 
 var setMsg = {
@@ -279,6 +346,7 @@ var setErr = {
 	UI_EXTRA_ENV_INVALID:  "<TMPL_VAR MGISMART.UI_EXTRA_ENV_INVALID>",
 	UI_EXTRA_ENV_CONFLICT: "<TMPL_VAR MGISMART.UI_EXTRA_ENV_CONFLICT>",
 	UI_SAVE_FAILED:        "<TMPL_VAR MGISMART.UI_SAVE_FAILED>",
+	UI_PIN_REQUIRED:       "<TMPL_VAR MGISMART.UI_PIN_REQUIRED>",
 	UI_POST_REQUIRED:      "<TMPL_VAR MGISMART.UI_POST_REQUIRED>",
 	UI_UNKNOWN_ACTION:     "<TMPL_VAR MGISMART.UI_UNKNOWN_ACTION>",
 	UI_AJAX_FAILED:        "<TMPL_VAR MGISMART.UI_AJAX_FAILED>"
@@ -299,7 +367,7 @@ function setTogglePassword() {
 }
 
 function setLoad() {
-	$.ajax({ url: "ajax.cgi", type: "GET", dataType: "json", data: { action: "config-get" } })
+	$.ajax({ url: "ajax.cgi", type: "POST", dataType: "json", data: { action: "config-get", secpin: mgiPin } })
 		.done(function(data) {
 			if (!data || !data.ok || !data.config) { return; }
 			var c = data.config;
@@ -342,7 +410,7 @@ function setSave() {
 	gwStatusLine("#set-savinghint", setMsg.SAVING, "info");
 	$.ajax({
 		url: "ajax.cgi", type: "POST", dataType: "json",
-		data: { action: "config-set", config: JSON.stringify(payload) }
+		data: { action: "config-set", config: JSON.stringify(payload), secpin: mgiPin }
 	})
 		.done(function(data) {
 			if (data && data.ok) {
@@ -415,7 +483,7 @@ function upgVersions(force) {
 function upgChannelChange() {
 	$.ajax({
 		url: "ajax.cgi", type: "POST", dataType: "json",
-		data: { action: "config-set", config: JSON.stringify({ update_channel: $("#upg-channel").val() }) }
+		data: { action: "set-channel", channel: $("#upg-channel").val() }
 	})
 		.always(function() { upgVersions(true); });
 }

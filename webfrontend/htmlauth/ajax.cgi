@@ -57,6 +57,40 @@ my $response = { ok => JSON::PP::false };
 sub is_post { return (($ENV{REQUEST_METHOD} || "") eq "POST"); }
 
 ##############################################################################
+# SecurePIN
+##############################################################################
+#
+# The configuration holds the iSMART credentials, and those grant whoever has
+# them the ability to locate and command the car. The LoxBerry login alone is
+# not enough for that, so reading or writing the configuration needs the
+# SecurePIN as a second factor.
+#
+# Checked on the SERVER, not just hidden in the browser. The core's own pages
+# only gate the UI, which is fine for what they show; here the endpoint hands
+# out a cleartext password, so a hidden form would be no protection at all -
+# anyone logged in could call this CGI directly.
+#
+# check_securepin() returns undef on success, 1 for a wrong PIN and 3 when it
+# has locked itself after repeated failures. It also sleeps on failure, which
+# is what makes guessing expensive - so it is called once per request and its
+# result is never cached.
+
+sub securepin_ok
+{
+	my ($pin) = @_;
+	return 0 if (!defined($pin) || $pin eq "");
+	my $result = LoxBerry::System::check_securepin($pin);
+	return (!defined($result) || $result == 0) ? 1 : 0;
+}
+
+sub require_pin
+{
+	my ($pin, $handler) = @_;
+	return $handler->() if (securepin_ok($pin));
+	return { ok => JSON::PP::false, error_key => "UI_PIN_REQUIRED" };
+}
+
+##############################################################################
 # Gateway process
 ##############################################################################
 
@@ -207,6 +241,22 @@ sub config_set
 
 	return { ok => JSON::PP::false, error_key => "UI_SAVE_FAILED" } if (!write_config_file($data));
 	return { ok => JSON::PP::true };
+}
+
+# Writes only the release channel. Split out of config_set so the Update tab
+# does not have to send the SecurePIN for a harmless setting.
+sub set_channel
+{
+	my ($channel) = @_;
+	$channel = mg_trim($channel // "");
+	$channel = ($channel eq "prerelease") ? "prerelease" : "release";
+
+	my $data = read_config_file();
+	$data->{MAIN} = {} if (ref($data->{MAIN}) ne "HASH");
+	$data->{MAIN}{update_channel} = $channel;
+
+	return { ok => JSON::PP::false, error_key => "UI_SAVE_FAILED" } if (!write_config_file($data));
+	return { ok => JSON::PP::true, channel => $channel };
 }
 
 sub read_config_file
@@ -361,11 +411,25 @@ elsif ($action eq "gw-restart") {
 elsif ($action eq "cloud-status") {
 	$response = cloud_status();
 }
+elsif ($action eq "checksecpin") {
+	# Mirrors the core's own endpoint: 0 means the PIN was accepted.
+	my $result = LoxBerry::System::check_securepin($q->{secpin});
+	$response = { ok => JSON::PP::true, error => defined($result) ? int($result) : 0 };
+}
 elsif ($action eq "config-get") {
-	$response = config_get();
+	# Hands out the iSMART password - PIN required.
+	$response = require_pin($q->{secpin}, \&config_get);
 }
 elsif ($action eq "config-set") {
-	$response = is_post() ? config_set($q->{config}) : { ok => JSON::PP::false, error_key => "UI_POST_REQUIRED" };
+	$response = is_post()
+		? require_pin($q->{secpin}, sub { config_set($q->{config}) })
+		: { ok => JSON::PP::false, error_key => "UI_POST_REQUIRED" };
+}
+elsif ($action eq "set-channel") {
+	# The Update tab's release channel. Deliberately not behind the PIN: it is
+	# neither a credential nor a way to reach the car, and requiring the PIN on
+	# the Update tab would only train people to type it out of habit.
+	$response = is_post() ? set_channel($q->{channel}) : { ok => JSON::PP::false, error_key => "UI_POST_REQUIRED" };
 }
 elsif ($action eq "version-info") {
 	$response = version_info(0);

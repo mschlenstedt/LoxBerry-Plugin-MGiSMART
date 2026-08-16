@@ -28,6 +28,9 @@ sub import {
 }
 
 sub pluginversion { return "0.0.0"; }
+# The real one returns undef on success and an error code otherwise; the stub
+# always fails, so nothing can accidentally pass a PIN check outside LoxBerry.
+sub check_securepin { return 1; }
 sub pluginloglevel { return 6; }
 sub plugindata { return {}; }
 sub lock { return undef; }

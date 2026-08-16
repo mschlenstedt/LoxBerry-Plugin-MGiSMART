@@ -2,6 +2,32 @@
 
 <div id="gw-service"></div>
 
+<!-- SecurePIN gate. The settings hold the iSMART credentials, so the content
+     stays hidden until the PIN is accepted - and ajax.cgi checks it again on
+     the server, so this is a convenience, not the protection itself. -->
+<div id="securepin_block" style="display:none">
+	<div class="mgi-pin">
+		<p><TMPL_VAR MGISMART.PIN_ENTER></p>
+		<div class="mgi-pin-row">
+			<input class="lb-input" name="securepin" id="securepin" type="password" placeholder="SecurePIN" autocomplete="off" onkeypress="return mgiPinKeyPress(event);">
+			<button type="button" class="lb-btn lb-btn-primary" id="check_securepin" data-role="none"><TMPL_VAR MGISMART.PIN_OK></button>
+		</div>
+		<div id="check_hint" style="padding:5px;">&nbsp;</div>
+	</div>
+	<div class="mgi-warning" style="max-width:420px; margin:16px auto 0;">
+		<p class="mgi-warning-title"><TMPL_VAR MGISMART.PIN_WHY_TITLE></p>
+		<p><TMPL_VAR MGISMART.PIN_WHY_BODY></p>
+	</div>
+</div>
+
+<div id="main_content" style="display:none">
+
+<div class="mgi-warning">
+	<p class="mgi-warning-title"><TMPL_VAR MGISMART.WARN_TITLE></p>
+	<p><TMPL_VAR MGISMART.WARN_BODY></p>
+	<p><TMPL_VAR MGISMART.WARN_LIABILITY></p>
+</div>
+
 <form id="settings-form" onsubmit="return false;">
 
 <details class="lb-collapsible" open>
@@ -129,5 +155,7 @@
 <div id="set-savinghint" style="display:none; text-align:center; margin-top:0.5em;"></div>
 
 </form>
+
+</div><!-- /main_content -->
 
 </div>

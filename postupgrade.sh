@@ -46,13 +46,23 @@ restore_stash()
 	return 0
 }
 
-# Whether the user had the gateway stopped, decided BEFORE the stash is consumed.
+# The user's decision about running or not survives the upgrade, in BOTH
+# directions. The stash is the authority; the packaged file never overrules it.
 #
-# The archive ships config/gateway_stopped.cfg so a fresh installation does not
-# start an unconfigured gateway. On an upgrade the core copies that file in as
-# well, which would stop a gateway that was happily running. The stash is the
-# authority on what the user actually wanted, so the flag is reconciled against
-# it below rather than being left to whichever copy landed last.
+#   stash HAS the flag  (user stopped it)  -> restored, gateway stays stopped
+#   stash has NO flag   (gateway was running) -> packaged flag removed, keeps running
+#
+# The reconciliation is needed because the archive ships
+# config/gateway_stopped.cfg - that is what keeps a fresh installation from
+# starting an unconfigured gateway - and the core copies it in on every upgrade
+# as well. Without the check below, that packaged copy would stop a gateway that
+# was running. It never causes the opposite: a stop is never undone here.
+#
+# Read BEFORE the stash is consumed, because restoring moves it away.
+#
+# No stash at all (a fresh install, or preupgrade.sh did not get to run) leaves
+# the packaged flag in place - erring towards "stopped", which is the safe
+# direction for something that talks to the user's car.
 if [ -d "$CONFIG_STASH" ]; then
 	HAD_STASH=1
 	[ -e "$CONFIG_STASH/gateway_stopped.cfg" ] && WAS_STOPPED=1 || WAS_STOPPED=0

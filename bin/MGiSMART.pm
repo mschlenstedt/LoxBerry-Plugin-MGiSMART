@@ -24,7 +24,7 @@ our @EXPORT_OK = qw(
 	derive_log_levels
 	config_dir
 	data_dir
-	trim
+	mg_trim
 	is_true
 );
 
@@ -130,7 +130,7 @@ sub topic_prefix
 	my ($cfg) = @_;
 	$cfg = plugin_config() if (!$cfg || ref($cfg) ne "HASH");
 
-	my $prefix = trim($cfg->{mqtt_topic} // "");
+	my $prefix = mg_trim($cfg->{mqtt_topic} // "");
 	$prefix = "saic" if (!length($prefix));
 	return _sanitize($prefix, is_true($cfg->{mqtt_allow_dots_in_topic}));
 }
@@ -141,7 +141,7 @@ sub topic_root
 	my ($cfg) = @_;
 	$cfg = plugin_config() if (!$cfg || ref($cfg) ne "HASH");
 
-	my $user = trim($cfg->{saic_user} // "");
+	my $user = mg_trim($cfg->{saic_user} // "");
 	return "" if (!length($user));
 
 	my $allow_dots = is_true($cfg->{mqtt_allow_dots_in_topic});
@@ -190,7 +190,12 @@ sub derive_log_levels
 	return ($map{$level} // "INFO", ($level >= 7) ? "DEBUG" : "WARNING");
 }
 
-sub trim
+# Deliberately not called "trim": LoxBerry::System exports a trim() of its own,
+# and every consumer of this module imports that too, so a same-named sub here
+# would trigger "Subroutine trim redefined" on every single call. The core's
+# version cannot simply be used instead - it does not guard against undef
+# (`my $s = shift; $s =~ s/…/`), which the call sites here rely on.
+sub mg_trim
 {
 	my ($value) = @_;
 	return "" if (!defined($value));

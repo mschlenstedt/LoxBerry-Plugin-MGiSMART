@@ -39,7 +39,7 @@ use FindBin;
 use lib $FindBin::Bin;
 use LoxBerry::System;
 use LoxBerry::IO;
-use MGiSMART qw(plugin_config installed_version gateway_installed topic_root topic_prefix trim);
+use MGiSMART qw(plugin_config installed_version gateway_installed topic_root topic_prefix mg_trim);
 
 my $desc = 'Checks the MG iSMART gateway: process, software, config and cloud';
 
@@ -61,7 +61,7 @@ my $cfg       = plugin_config();
 my $configdir = $lbpconfigdir;
 
 #############################################################
-# Area: Gateway (the process)
+# Gates: states in which judging the process would mislead
 #############################################################
 
 # A manual stop is a decision, not a fault - report it and check nothing else,
@@ -70,16 +70,30 @@ if (-e "$configdir/gateway_stopped.cfg") {
 	finish(6, 'Gateway: INFO (stopped manually).');
 }
 
+if (!gateway_installed()) {
+	finish(3, 'Gateway: ERROR (not installed).' . $loglink);
+}
+
+# Checked BEFORE the process, not after. A freshly installed plugin has no
+# credentials yet, so the gateway legitimately is not running - reporting that
+# as "not running" and pointing at the log sends the user hunting for a fault
+# when all that is missing is the setup. Not an error either, for the same
+# reason the manual stop is not one.
+my $user = mg_trim($cfg->{saic_user} // '');
+my $pass = $cfg->{saic_password} // '';
+if (!length($user) || !length($pass)) {
+	finish(6, 'Config: INFO (no iSMART account configured yet).');
+}
+
+#############################################################
+# Area: Gateway (the process)
+#############################################################
+
 my $pid = gateway_pid();
 if ($pid) {
 	area(5, "Gateway: OK (PID $pid)");
 }
 else {
-	# Not installed is a different problem than installed-but-dead, and naming it
-	# saves the user a pointless look into the log.
-	if (!gateway_installed()) {
-		finish(3, 'Gateway: ERROR (not installed).' . $loglink);
-	}
 	finish(3, 'Gateway: ERROR (not running).' . $loglink);
 }
 
@@ -107,12 +121,8 @@ else {
 # Area: Config
 #############################################################
 
-my $user = trim($cfg->{saic_user} // '');
-my $pass = $cfg->{saic_password} // '';
-
-if (!length($user) || !length($pass)) {
-	finish(3, clauses() . ' Config: ERROR (no iSMART credentials).' . $loglink);
-}
+# The credentials themselves were already gated above; reaching here means they
+# are present.
 area(5, 'Config: OK');
 
 #############################################################

@@ -16,7 +16,7 @@ use LoxBerry::System;
 # above, so the following "use lib" picks it up.
 use lib $lbpbindir;
 use LoxBerry::IO;
-use MGiSMART qw(plugin_config installed_version gateway_installed topic_root topic_prefix managed_env_keys derive_log_levels trim);
+use MGiSMART qw(plugin_config installed_version gateway_installed topic_root topic_prefix managed_env_keys derive_log_levels mg_trim);
 
 my $cgi    = CGI->new;
 my $q      = $cgi->Vars;
@@ -144,8 +144,8 @@ sub config_get
 	my $cfg = plugin_config();
 	# Fill in the defaults a fresh installation has no values for, so the form
 	# does not start out empty.
-	$cfg->{saic_region}    = "eu"      if (!length(trim($cfg->{saic_region} // "")));
-	$cfg->{mqtt_topic}     = "saic"    if (!length(trim($cfg->{mqtt_topic} // "")));
+	$cfg->{saic_region}    = "eu"      if (!length(mg_trim($cfg->{saic_region} // "")));
+	$cfg->{mqtt_topic}     = "saic"    if (!length(mg_trim($cfg->{mqtt_topic} // "")));
 	$cfg->{update_channel} = "release" if (($cfg->{update_channel} // "") ne "prerelease");
 
 	# The gateway log level is not a plugin setting - it follows the LoxBerry log
@@ -167,7 +167,7 @@ sub validate_extra_env
 
 	foreach my $line (split(/\r?\n/, $text)) {
 		next if ($line !~ /\S/ || $line =~ /\A\s*#/);
-		my $trimmed = trim($line);
+		my $trimmed = mg_trim($line);
 		my ($key) = $trimmed =~ /\A([A-Za-z_][A-Za-z0-9_]*)\s*=/;
 		return (0, "UI_EXTRA_ENV_INVALID", $trimmed) if (!defined($key));
 		return (0, "UI_EXTRA_ENV_CONFLICT", $key) if ($managed{uc($key)});
@@ -184,11 +184,11 @@ sub config_set
 	my ($ok, $error_key, $detail) = validate_extra_env($payload->{extra_env});
 	return { ok => JSON::PP::false, error_key => $error_key, detail => $detail } if (!$ok);
 
-	my $region = lc(trim($payload->{saic_region} // "eu"));
+	my $region = lc(mg_trim($payload->{saic_region} // "eu"));
 	$region = "eu" if ($region !~ /\A(?:eu|au|tr)\z/);
 	$payload->{saic_region} = $region;
 
-	my $channel = trim($payload->{update_channel} // "release");
+	my $channel = mg_trim($payload->{update_channel} // "release");
 	$payload->{update_channel} = ($channel eq "prerelease") ? "prerelease" : "release";
 
 	# Read-modify-write, so keys outside @CONFIG_KEYS survive a save.
@@ -245,10 +245,10 @@ sub version_info
 	my $arg = $force ? "available force" : "available";
 	my (undef, $available) = LoxBerry::System::execute(command => "$pkg $arg 2>/dev/null");
 	$available = "" if (!defined($available));
-	$available = trim($available);
+	$available = mg_trim($available);
 
 	my (undef, $channel) = LoxBerry::System::execute(command => "$pkg channel 2>/dev/null");
-	$channel = trim($channel // "");
+	$channel = mg_trim($channel // "");
 	$channel = "release" if ($channel ne "prerelease");
 
 	my $update = 0;

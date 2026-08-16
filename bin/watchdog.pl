@@ -29,7 +29,7 @@ use lib $FindBin::Bin;
 use LoxBerry::System;
 use LoxBerry::Log;
 use LoxBerry::IO;
-use MGiSMART qw(plugin_config installed_version gateway_installed derive_log_levels trim is_true);
+use MGiSMART qw(plugin_config installed_version gateway_installed derive_log_levels mg_trim is_true);
 
 my $psubfolder  = $lbpplugindir;
 my $config_dir  = $lbpconfigdir;
@@ -129,7 +129,7 @@ sub do_start
 	}
 
 	my $cfg = plugin_config();
-	if (!length(trim($cfg->{saic_user} // "")) || !length($cfg->{saic_password} // "")) {
+	if (!length(mg_trim($cfg->{saic_user} // "")) || !length($cfg->{saic_password} // "")) {
 		LOGERR("No iSMART credentials configured. Enter them on the Settings tab.");
 		print "No iSMART credentials configured.\n";
 		return 1;
@@ -310,7 +310,7 @@ sub gateway_settings
 
 	# Only the prefix: the gateway appends the account name itself and applies
 	# its own character rules to the result.
-	my $prefix = trim($cfg->{mqtt_topic} // "");
+	my $prefix = mg_trim($cfg->{mqtt_topic} // "");
 	$prefix = "saic" if (!length($prefix));
 	push @pairs, ["MQTT_TOPIC", $prefix, 0];
 	push @pairs, ["MQTT_ALLOW_DOTS_IN_TOPIC", is_true($cfg->{mqtt_allow_dots_in_topic}) ? "True" : "False", 0];
@@ -319,13 +319,13 @@ sub gateway_settings
 	push @pairs, ["SAIC_USER", $cfg->{saic_user} // "", 0];
 	push @pairs, ["SAIC_PASSWORD", $cfg->{saic_password} // "", 1];
 
-	my $region = lc(trim($cfg->{saic_region} // "eu"));
+	my $region = lc(mg_trim($cfg->{saic_region} // "eu"));
 	$region = "eu" if (!exists($REST_URI{$region}));
 	push @pairs, ["SAIC_REGION", $region, 0];
 	push @pairs, ["SAIC_REST_URI", $REST_URI{$region}, 0];
 
-	push @pairs, ["SAIC_PHONE_COUNTRY_CODE", trim($cfg->{saic_phone_country_code}), 0]
-		if (length(trim($cfg->{saic_phone_country_code} // "")));
+	push @pairs, ["SAIC_PHONE_COUNTRY_CODE", mg_trim($cfg->{saic_phone_country_code}), 0]
+		if (length(mg_trim($cfg->{saic_phone_country_code} // "")));
 
 	# --- Optional tuning ---------------------------------------------------
 	my @optional = (
@@ -337,7 +337,7 @@ sub gateway_settings
 		[saic_user_timezone        => "SAIC_USER_TIMEZONE"],
 	);
 	foreach my $entry (@optional) {
-		my $value = trim($cfg->{$entry->[0]} // "");
+		my $value = mg_trim($cfg->{$entry->[0]} // "");
 		push @pairs, [$entry->[1], $value, 0] if (length($value));
 	}
 
@@ -399,12 +399,12 @@ sub write_env_file
 	# Appended last, but the web interface refuses lines that collide with a
 	# managed key, so this cannot silently override anything above.
 	my $extra = $cfg->{extra_env} // "";
-	if (length(trim($extra))) {
+	if (length(mg_trim($extra))) {
 		push @lines, "";
 		push @lines, "# Additional environment variables from the Settings tab";
 		foreach my $line (split(/\r?\n/, $extra)) {
 			next if ($line !~ /\S/ || $line =~ /\A\s*#/);
-			push @lines, trim($line);
+			push @lines, mg_trim($line);
 		}
 	}
 

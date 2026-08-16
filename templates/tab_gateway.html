@@ -40,6 +40,12 @@
 			<div class="lb-form-help"><TMPL_VAR MGISMART.TOPIC_SUBSCRIBE_HELP></div>
 		</div>
 
+		<div class="lb-actions" style="margin-top:1em;">
+			<!-- Relative on purpose: the MQTT Gateway lives on the same LoxBerry
+			     and the host name differs from box to box. -->
+			<a class="lb-btn lb-btn-primary" href="/admin/system/mqtt-gateway.cgi?form=subscriptions" target="_blank" rel="noopener"><TMPL_VAR MGISMART.TOPIC_OPEN_SUBSCRIPTIONS></a>
+		</div>
+
 		<div class="lb-form-help" style="margin-top:1.2em;"><TMPL_VAR MGISMART.TOPIC_COMMANDS_HINT></div>
 	</div>
 </details>

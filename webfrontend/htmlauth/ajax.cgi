@@ -121,9 +121,11 @@ sub cloud_status
 	return {
 		ok               => JSON::PP::true,
 		configured       => JSON::PP::true,
-		# What the user has to subscribe in the MQTT Gateway: everything the
-		# gateway publishes lives below the prefix.
-		topic            => "$prefix/#",
+		# The name the vehicle data appears under in the MQTT Gateway. V2
+		# discovers topics by itself and lets the user tick individual
+		# datapoints, so this is a group name to look for - not a wildcard
+		# subscription to type in.
+		topic            => $prefix,
 		topic_root       => $root,
 		online           => (defined($lwt) && lc($lwt) eq "online") ? JSON::PP::true : JSON::PP::false,
 		lwt              => $lwt // "",

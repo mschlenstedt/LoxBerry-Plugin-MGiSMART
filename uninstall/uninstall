@@ -22,6 +22,15 @@ DATADIR="$ARGV5/data/plugins/$ARGV3"
 RUNTIME_DIR="/var/run/shm/$ARGV3"
 WATCHDOG="$BINDIR/watchdog.pl"
 
+# The directories preupgrade.sh moves config and data to so they survive
+# purge_installation(). They are siblings of the plugin folders, which is
+# exactly why the core does not remove them - neither on upgrade nor here. An
+# upgrade that died between preupgrade.sh and postupgrade.sh can leave one
+# behind holding a full gateway installation, well over 100 MB, so the uninstall
+# has to take care of them itself.
+CONFIG_STASH="$ARGV5/config/plugins/.$ARGV3.upgrade"
+DATA_STASH="$ARGV5/data/plugins/.$ARGV3.upgrade"
+
 # Stop the gateway while the plugin files are still present.
 if [ -x "$WATCHDOG" ]; then
 	echo "<INFO> Stopping the gateway"
@@ -29,11 +38,13 @@ if [ -x "$WATCHDOG" ]; then
 fi
 
 # Belt and braces: if the watchdog was already gone, end any process still
-# running from this plugin's installation directory.
-if [ -d "$DATADIR" ]; then
+# running from this plugin's installation directory - including one started from
+# a stash, which can happen after an interrupted upgrade.
+for base in "$DATADIR" "$DATA_STASH"; do
+	[ -d "$base" ] || continue
 	for procdir in /proc/[0-9]*; do
 		[ -r "$procdir/cmdline" ] || continue
-		if tr '\0' ' ' <"$procdir/cmdline" 2>/dev/null | grep -q "$DATADIR/gateway/src/main.py"; then
+		if tr '\0' ' ' <"$procdir/cmdline" 2>/dev/null | grep -q "$base/gateway/src/main.py"; then
 			pid="$(basename "$procdir")"
 			echo "<INFO> Ending leftover gateway process $pid"
 			kill -TERM "$pid" 2>/dev/null || true
@@ -41,12 +52,21 @@ if [ -d "$DATADIR" ]; then
 			[ -d "/proc/$pid" ] && kill -KILL "$pid" 2>/dev/null
 		fi
 	done
-fi
+done
 
 if [ -d "$DATADIR" ]; then
 	echo "<INFO> Removing the gateway installation and its Python environment"
 	rm -rf "$DATADIR"
 fi
+
+# Orphaned upgrade stashes. The core removes neither, because both sit next to
+# the plugin folders rather than inside them.
+for stash in "$DATA_STASH" "$CONFIG_STASH"; do
+	if [ -e "$stash" ]; then
+		echo "<INFO> Removing a leftover upgrade backup: $stash"
+		rm -rf "$stash"
+	fi
+done
 
 if [ -d "$RUNTIME_DIR" ]; then
 	echo "<INFO> Removing the runtime directory"

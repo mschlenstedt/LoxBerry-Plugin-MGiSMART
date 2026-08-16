@@ -38,6 +38,9 @@ RUNDIR="/var/run/shm/$PLUGINNAME"
 
 GATEWAY_DIR="$DATADIR/gateway"
 VENV_DIR="$DATADIR/venv"
+# Holds privately provisioned CPython builds, one directory per version. Only
+# used when the system Python is too old for the gateway.
+PYTHON_ROOT="$DATADIR/python"
 VERSION_FILE="$CONFIGDIR/version.json"
 PLUGIN_CONFIG="$CONFIGDIR/pluginconfig.json"
 STOPPED_MARKER="$CONFIGDIR/gateway_stopped.cfg"
@@ -48,6 +51,12 @@ REPO="SAIC-iSmart-API/saic-python-mqtt-gateway"
 API="https://api.github.com/repos/$REPO"
 CACHE_TTL=21600   # 6 hours
 
+# Self-contained CPython builds, used when the system Python is too old. These
+# are the same builds uv provisions; uv itself is no help here because Debian
+# only ships it in sid/forky, so it would have to be downloaded just as much -
+# one more moving part for the same tarball.
+PBS_REPO="astral-sh/python-build-standalone"
+
 # Modules that must import successfully before a build is activated. Without
 # this check a broken dependency set would only show up as a gateway that dies
 # right after every start.
@@ -56,6 +65,7 @@ IMPORT_CHECK="saic_ismart_client_ng, gmqtt, httpx, apscheduler, dotenv, inflecti
 # Filled in by build_new and consumed by activate_new.
 NEW_VERSION=""
 NEW_TAG=""
+PYBIN=""
 
 ##############################################################################
 # Small helpers
@@ -213,6 +223,207 @@ available_version()
 }
 
 ##############################################################################
+# Python provisioning
+##############################################################################
+
+# Maps uname -m onto the python-build-standalone triple. Empty when there is no
+# build for this machine - 32-bit ARM in particular has none.
+pbs_arch()
+{
+	case "$(uname -m)" in
+		x86_64|amd64)  echo "x86_64-unknown-linux-gnu" ;;
+		aarch64|arm64) echo "aarch64-unknown-linux-gnu" ;;
+		*)             echo "" ;;
+	esac
+}
+
+# True when $1 (an interpreter) satisfies the "$2 <= version < $3" window.
+# $3 may be empty for "no upper bound".
+python_satisfies()
+{
+	[ -x "$1" ] || command -v "$1" >/dev/null 2>&1 || return 1
+	"$1" -c "
+import sys
+lo = tuple(int(p) for p in '$2'.split('.'))
+hi = '$3'
+v = sys.version_info[:len(lo)]
+if v < lo:
+    sys.exit(1)
+if hi:
+    h = tuple(int(p) for p in hi.split('.'))
+    if sys.version_info[:len(h)] >= h:
+        sys.exit(1)
+sys.exit(0)
+" >/dev/null 2>&1
+}
+
+python_version_of()
+{
+	"$1" -c 'import sys; print("%d.%d.%d" % sys.version_info[:3])' 2>/dev/null
+}
+
+# Downloads a CPython that satisfies the window and returns the path to its
+# interpreter. Installed under its own version directory rather than a fixed
+# one, so provisioning a different version never invalidates the venv an
+# existing installation is still running on - that keeps the rollback in
+# build_new/activate_new intact.
+provision_python()
+{
+	local lo hi arch relfile pick version url dest
+	lo="$1"
+	hi="$2"
+
+	arch="$(pbs_arch)"
+	if [ -z "$arch" ]; then
+		echo "<ERROR> No prebuilt Python is available for $(uname -m)." >&2
+		return 1
+	fi
+
+	relfile="$(mktemp "${TMPDIR:-/tmp}/pbs-XXXXXX.json")" || return 1
+	if ! curl -fsSL --max-time 30 \
+		-H 'Accept: application/vnd.github+json' \
+		-H "User-Agent: LoxBerry-Plugin-$PLUGINNAME" \
+		"https://api.github.com/repos/$PBS_REPO/releases/latest" -o "$relfile" 2>/dev/null
+	then
+		rm -f "$relfile"
+		echo "<ERROR> Could not query the Python builds of $PBS_REPO." >&2
+		return 1
+	fi
+
+	# Of the series that satisfy the window, take the LOWEST. That is the one
+	# the gateway declares support for; the newest series available is often
+	# ahead of what upstream tests against.
+	pick="$(python3 - "$relfile" "$arch" "$lo" "$hi" <<'EOF' 2>/dev/null
+import json, re, sys
+
+path, arch, lo, hi = sys.argv[1:5]
+lo_t = tuple(int(p) for p in lo.split("."))
+hi_t = tuple(int(p) for p in hi.split(".")) if hi else None
+
+with open(path, encoding="utf-8") as fh:
+    data = json.load(fh)
+
+pat = re.compile(
+    r"^cpython-(\d+)\.(\d+)\.(\d+)\+\d+-" + re.escape(arch) + r"-install_only\.tar\.gz$"
+)
+best = None
+for asset in data.get("assets", []):
+    m = pat.match(asset.get("name", ""))
+    if not m:
+        continue
+    ver = tuple(int(g) for g in m.groups())
+    if ver[: len(lo_t)] < lo_t:
+        continue
+    if hi_t and ver[: len(hi_t)] >= hi_t:
+        continue
+    # lowest series, newest patch within it
+    key = (ver[0], ver[1], -ver[2])
+    if best is None or key < best[0]:
+        best = (key, ver, asset.get("browser_download_url", ""))
+
+if best and best[2]:
+    print("%d.%d.%d|%s" % (best[1][0], best[1][1], best[1][2], best[2]))
+EOF
+)"
+	rm -f "$relfile"
+
+	if [ -z "$pick" ]; then
+		echo "<ERROR> No prebuilt Python matching >=$lo${hi:+,<$hi} for $arch." >&2
+		return 1
+	fi
+
+	version="${pick%%|*}"
+	url="${pick#*|}"
+	dest="$PYTHON_ROOT/$version"
+
+	if [ -x "$dest/bin/python3" ]; then
+		echo "$dest/bin/python3"
+		return 0
+	fi
+
+	echo "<INFO> Installing a private Python $version (the system Python is too old)." >&2
+
+	local tmptar
+	tmptar="$(mktemp "${TMPDIR:-/tmp}/python-XXXXXX.tar.gz")" || return 1
+	if ! curl -fsSL --max-time 600 -H "User-Agent: LoxBerry-Plugin-$PLUGINNAME" "$url" -o "$tmptar"; then
+		rm -f "$tmptar"
+		echo "<ERROR> Could not download the Python build." >&2
+		return 1
+	fi
+
+	mkdir -p "$PYTHON_ROOT"
+	rm -rf "$dest.tmp"
+	mkdir -p "$dest.tmp"
+	# The install_only tarballs wrap everything in a single "python/" directory.
+	if ! tar -xzf "$tmptar" -C "$dest.tmp" --strip-components=1; then
+		rm -f "$tmptar"
+		rm -rf "$dest.tmp"
+		echo "<ERROR> Could not unpack the Python build." >&2
+		return 1
+	fi
+	rm -f "$tmptar"
+
+	if [ ! -x "$dest.tmp/bin/python3" ]; then
+		rm -rf "$dest.tmp"
+		echo "<ERROR> The unpacked Python build has no bin/python3." >&2
+		return 1
+	fi
+	rm -rf "$dest"
+	mv "$dest.tmp" "$dest"
+
+	echo "$dest/bin/python3"
+	return 0
+}
+
+# Decides which interpreter builds the venv and prints its path. Prefers the
+# system Python; only when that is too old does it fall back to a private
+# build - so a LoxBerry on Debian 13 stays free of any extra runtime.
+ensure_python()
+{
+	local lo hi candidate
+	lo="$1"
+	hi="$2"
+
+	if python_satisfies "python3" "$lo" "$hi"; then
+		echo "<INFO> Using the system Python $(python_version_of python3)." >&2
+		command -v python3
+		return 0
+	fi
+
+	# An already provisioned build that still fits is reused as is.
+	if [ -d "$PYTHON_ROOT" ]; then
+		for candidate in "$PYTHON_ROOT"/*/bin/python3; do
+			[ -x "$candidate" ] || continue
+			if python_satisfies "$candidate" "$lo" "$hi"; then
+				echo "<INFO> Using the private Python $(python_version_of "$candidate")." >&2
+				echo "$candidate"
+				return 0
+			fi
+		done
+	fi
+
+	provision_python "$lo" "$hi"
+}
+
+# Removes provisioned Python versions that are no longer in use. Called after a
+# successful activation, when the venv definitely references $1.
+prune_pythons()
+{
+	local keep dir
+	keep="$1"
+	[ -d "$PYTHON_ROOT" ] || return 0
+	for dir in "$PYTHON_ROOT"/*; do
+		[ -d "$dir" ] || continue
+		case "$keep" in
+			"$dir"/*) continue ;;
+		esac
+		echo "<INFO> Removing the unused Python in $(basename "$dir")."
+		rm -rf "$dir"
+	done
+	return 0
+}
+
+##############################################################################
 # Install
 ##############################################################################
 
@@ -222,7 +433,7 @@ available_version()
 # a new venv instead of upgrading the existing one in place.
 build_new()
 {
-	local channel rel tarball tmptar reqs req have
+	local channel rel tarball tmptar reqs reqwin req reqmax
 
 	channel="$(update_channel)"
 	echo "<INFO> Update channel: $channel"
@@ -272,41 +483,46 @@ build_new()
 		return 4
 	fi
 
-	# The gateway declares its own minimum Python version, so a release raising
-	# that requirement is caught here instead of at the first import. Checked
-	# before anything is built and long before the switch-over, so a refused
-	# update leaves the running installation completely untouched.
+	# The gateway declares the Python version window it needs. Read it from the
+	# release we just unpacked rather than hardcoding it, so a release raising
+	# the requirement carries over by itself.
 	#
 	# pip cannot do this for us: we only install the dependencies, never the
-	# project itself, and the dependencies carry no such requirement.
-	req="$(python3 - "$GATEWAY_DIR.new/pyproject.toml" <<'EOF' 2>/dev/null
+	# project itself, and the dependencies carry no such requirement - which is
+	# exactly why a too-old Python installs cleanly and only fails at runtime.
+	reqwin="$(python3 - "$GATEWAY_DIR.new/pyproject.toml" <<'EOF' 2>/dev/null
 import re, sys, tomllib
 try:
     with open(sys.argv[1], "rb") as fh:
         data = tomllib.load(fh)
 except Exception:
     raise SystemExit(0)
-m = re.search(r">=\s*(\d+\.\d+)", data.get("project", {}).get("requires-python", ""))
-if m:
-    print(m.group(1))
+spec = data.get("project", {}).get("requires-python", "")
+lo = re.search(r">=\s*(\d+\.\d+)", spec)
+hi = re.search(r"<\s*(\d+\.\d+)", spec)
+if lo:
+    print("%s|%s" % (lo.group(1), hi.group(1) if hi else ""))
 EOF
 )"
-	if [ -n "$req" ] && ! python3 -c "
-import sys
-r = tuple(int(p) for p in '$req'.split('.'))
-sys.exit(0 if sys.version_info[:len(r)] >= r else 1)
-" 2>/dev/null
-	then
-		have="$(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])' 2>/dev/null)"
-		echo "<ERROR> saic-python-mqtt-gateway $NEW_VERSION needs Python $req or newer, but this system has $have."
-		echo "<ERROR> Debian 12 ('Bookworm') ships Python 3.11; Debian 13 ('Trixie') ships 3.13."
-		echo "<ERROR> Nothing was changed - the existing installation is still in place."
-		rm -rf "$GATEWAY_DIR.new"
-		return 5
+	req="${reqwin%%|*}"
+	reqmax="${reqwin#*|}"
+	[ "$reqwin" = "$req" ] && reqmax=""
+
+	if [ -z "$req" ]; then
+		echo "<WARNING> Could not read requires-python; building with the system Python."
+		PYBIN="$(command -v python3)"
+	else
+		echo "<INFO> saic-python-mqtt-gateway $NEW_VERSION needs Python >=$req${reqmax:+,<$reqmax}."
+		PYBIN="$(ensure_python "$req" "$reqmax")"
+		if [ -z "$PYBIN" ] || [ ! -x "$PYBIN" ]; then
+			echo "<ERROR> No suitable Python could be provided. Nothing was changed."
+			rm -rf "$GATEWAY_DIR.new"
+			return 5
+		fi
 	fi
 
-	echo "<INFO> Creating the Python environment"
-	if ! python3 -m venv "$VENV_DIR.new"; then
+	echo "<INFO> Creating the Python environment with $("$PYBIN" -c 'import sys; print("Python %d.%d.%d" % sys.version_info[:3])' 2>/dev/null)"
+	if ! "$PYBIN" -m venv "$VENV_DIR.new"; then
 		echo "<ERROR> Could not create the venv. Is python3-venv installed?"
 		rm -rf "$GATEWAY_DIR.new" "$VENV_DIR.new"
 		return 4
@@ -374,6 +590,11 @@ with open(path, "w", encoding="utf-8") as fh:
     json.dump({"version": version, "tag": tag,
                "installed": time.strftime("%Y-%m-%d %H:%M:%S")}, fh, indent=2)
 EOF
+
+	# Safe only now: the venv in place references $PYBIN, so any other
+	# provisioned version is genuinely unused. Doing this earlier would pull the
+	# interpreter out from under a still-running installation.
+	prune_pythons "$PYBIN"
 
 	echo "<OK> saic-python-mqtt-gateway $NEW_VERSION installed"
 	return 0

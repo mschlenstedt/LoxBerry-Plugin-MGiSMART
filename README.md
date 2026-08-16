@@ -7,19 +7,27 @@ The plugin does not talk to the vehicle itself. It installs and operates **[saic
 ## Requirements
 
 - LoxBerry 4.0.0 or newer
-- **Python 3.12 or newer**, which in practice means a LoxBerry on **Debian 13 ("Trixie")**. Debian 12 ("Bookworm") ships Python 3.11 and is not sufficient — see below.
+- A 64-bit machine (x86_64 or aarch64)
 - An iSMART account with the vehicle registered to it (create it in the iSMART app)
 - The LoxBerry MQTT broker and MQTT Gateway
 
-### Why Python 3.12
+Debian 12 ("Bookworm") works as well as Debian 13 ("Trixie"), even though the gateway needs a Python that Bookworm does not have — see below.
 
-`saic-python-mqtt-gateway` declares `requires-python >= 3.12` and uses language features such as `typing.override` that do not exist before it. That requirement is invisible to `pip`, because the plugin installs only the gateway's *dependencies* and none of those need 3.12 — so on Debian 12 everything would install without a single error and the gateway would then die on its first import.
+### About the Python version
 
-The plugin therefore checks the requirement itself, and reads it from the gateway's own `pyproject.toml` rather than hardcoding a number, so a future release raising it is picked up automatically:
+`saic-python-mqtt-gateway` declares `requires-python >= 3.12` and uses language features such as `typing.override` that do not exist before it. Debian 12 ships Python 3.11, Debian 13 ships 3.13.
 
-- `preroot.sh` refuses the installation before anything is copied, with a message naming the required and the found version.
-- `bin/gateway_pkg.sh` re-checks after unpacking a release, before building anything. A gateway update that would need a newer Python is refused and the running installation stays untouched.
-- `bin/watchdog.pl` checks before each start, so an interpreter that changed underneath an existing installation produces one clear log line instead of a traceback.
+That requirement is invisible to `pip`, because the plugin installs only the gateway's *dependencies* and none of those need 3.12. On Debian 12 everything would therefore install without a single error and the gateway would die on its first import — which is exactly what happened during development, and why the plugin checks the requirement itself.
+
+**On Debian 13 nothing special happens:** the system Python is used, and no extra runtime is installed.
+
+**On Debian 12** the plugin installs a private CPython below its own data directory, from [python-build-standalone](https://github.com/astral-sh/python-build-standalone) — the same prebuilt interpreters `uv` uses. Nothing is compiled, the system Python is not touched, no apt source is added, and uninstalling the plugin removes the interpreter with it. It costs one extra download of roughly 30 MB at install time.
+
+The required version is always read from the gateway's own `pyproject.toml` rather than hardcoded, so a future release raising it carries over by itself. It is enforced at three points:
+
+- `preroot.sh`, before anything is copied. It only cancels the installation when no suitable Python can be obtained at all — no `python3` present, or a machine with no prebuilt interpreter available (32-bit ARM).
+- `bin/gateway_pkg.sh`, after unpacking a release and before building anything, choosing the interpreter to build the venv with. If a newer Python is needed than is available, the update is refused and the running installation stays untouched.
+- `bin/watchdog.pl`, before each start, so an interpreter that disappeared underneath an existing installation produces one clear log line instead of a traceback.
 
 ## What the plugin does
 

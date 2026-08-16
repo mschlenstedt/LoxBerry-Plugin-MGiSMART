@@ -123,7 +123,7 @@ sub do_start
 
 	my ($have_py, $need_py) = python_requirement_unmet();
 	if ($have_py) {
-		LOGERR("Python $have_py is too old: the gateway needs $need_py or newer. Debian 12 ('Bookworm') ships 3.11, Debian 13 ('Trixie') ships 3.13.");
+		LOGERR("The environment runs Python $have_py, but the gateway needs $need_py or newer. Reinstall it from the Update tab, which provides a suitable Python.");
 		print "Python $have_py is too old; the gateway needs $need_py or newer.\n";
 		return 1;
 	}
@@ -420,9 +420,10 @@ sub write_env_file
 
 # The gateway declares a minimum Python version in its pyproject.toml. Checking
 # it before the start turns an unreadable ImportError traceback in the gateway
-# log into one clear line. preroot.sh and gateway_pkg.sh already refuse an
-# install on too old a Python; this catches the case where the interpreter
-# changes underneath an existing installation, e.g. after an OS upgrade.
+# log into one clear line. gateway_pkg.sh builds the venv with an interpreter
+# that satisfies the requirement, so this should never fire - it catches the
+# venv having been built against an interpreter that later disappeared or was
+# replaced, for instance by an OS upgrade.
 #
 # Returns (have, need) when the requirement is not met, and nothing otherwise -
 # including when either version cannot be determined, because a failed check

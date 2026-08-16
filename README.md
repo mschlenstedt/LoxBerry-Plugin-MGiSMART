@@ -4,6 +4,10 @@ A LoxBerry plugin that connects MG cars with iSMART connectivity (MG S6 EV, MG4,
 
 The plugin does not talk to the vehicle itself. It installs and operates **[saic-python-mqtt-gateway](https://github.com/SAIC-iSmart-API/saic-python-mqtt-gateway)**, which logs in to the SAIC cloud, publishes the vehicle data over MQTT and accepts commands for the car — many thanks to that project and to the [SAIC-iSmart-API](https://github.com/SAIC-iSmart-API) community. What this plugin adds is a one-click installation on LoxBerry, a web interface for the settings, control and supervision of the gateway process, and updates of the gateway software.
 
+## Documentation
+
+- [LoxBerry Wiki (user documentation)](https://wiki.loxberry.de/plugins/mgismart)
+
 ## Requirements
 
 - LoxBerry 4.0.0 or newer
@@ -58,11 +62,11 @@ The gateway configuration (`.env`) is **regenerated on every start**. That is ho
 
 ## MQTT
 
-The gateway publishes below `<prefix>/<iSMART user>/…`, by default with the prefix `saic`. The exact topic is shown on the Gateway tab.
+The gateway publishes below `<prefix>/<iSMART user>/…`, by default with the prefix `saic`. The Gateway tab shows the topic group to look for.
 
-**Subscribe to that topic in the LoxBerry MQTT Gateway** — the plugin deliberately does not change that configuration for you. MQTT Gateway V2 subscribes per topic, and which values you want forwarded to the Miniserver is your decision.
+MQTT Gateway V2 **discovers those topics by itself** — nothing has to be entered anywhere. Open its *Subscriptions* page, find the group and tick the individual datapoints you want forwarded to the Miniserver. Which ones those are is your decision, so the plugin deliberately does not touch that configuration.
 
-Commands to the vehicle are sent on topics ending in `/set` below the same prefix — locking, climate, charging, and so on. The available commands and their value ranges are documented in the [gateway README](https://github.com/SAIC-iSmart-API/saic-python-mqtt-gateway#commands-over-mqtt). Build your Loxone virtual outputs from those.
+Commands to the vehicle are sent on topics ending in `/set` below the same prefix — locking, climate, charging, and so on. They are documented in the [plugin wiki](https://wiki.loxberry.de/plugins/mgismart). Build your Loxone virtual outputs from those.
 
 ## Licence
 

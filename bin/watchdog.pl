@@ -98,6 +98,27 @@ sub wlog_ok   { logsession(); LOGOK(@_);   }
 sub wlog_warn { logsession(); LOGWARN(@_); }
 sub wlog_err  { logsession(); LOGERR(@_);  }
 
+# Written regardless of the configured loglevel.
+#
+# LoxBerry::Log drops anything whose severity is above the plugin loglevel, so
+# at loglevel 3 (ERROR) a perfectly normal stop or restart left a logfile
+# containing nothing but the header. Starting and stopping the gateway is
+# precisely what one opens this log for, so those lines have to survive any
+# loglevel - without pretending to be errors, which would colour a routine stop
+# red in the log manager.
+#
+# The mechanism is the one the core uses for its own header lines: write()
+# never filters a negative severity, and it then adds no tag of its own, so the
+# tag travels inside the text and the viewer still colours the line.
+sub wlog_event
+{
+	my ($tag, $message) = @_;
+	logsession();
+	$log->write(-1, "<$tag> $message");
+	$log->close();
+	return;
+}
+
 # An explicit --verbose run is always meant to be watched, so it opens the
 # session even when the outcome turns out to be "nothing to do".
 logsession() if ($verbose);
@@ -140,7 +161,7 @@ sub do_start
 	unlink($stopped_marker) if (-e $stopped_marker);
 
 	if (gateway_running()) {
-		wlog_ok("The gateway is already running.");
+		wlog_event("OK", "The gateway is already running.");
 		print "The gateway is already running.\n";
 		return 0;
 	}
@@ -223,7 +244,7 @@ sub do_start
 		return 1;
 	}
 	reset_failures();
-	wlog_ok("Gateway started (PID $pid).");
+	wlog_event("OK", "Gateway started (PID $pid).");
 	print "Started the gateway (PID $pid).\n";
 	return 0;
 }
@@ -243,13 +264,13 @@ sub do_stop
 		$pid = find_gateway_pid();
 	}
 	if (!$pid) {
-		wlog_ok("The gateway is not running.");
+		wlog_event("OK", "The gateway is not running.");
 		print "The gateway is not running.\n";
 		unlink($pid_file);
 		return 0;
 	}
 
-	wlog_inf("Stopping the gateway (PID $pid).");
+	wlog_event("INFO", "Stopping the gateway (PID $pid).");
 	kill("TERM", $pid);
 	for (1 .. 20) {
 		last if (!process_is_gateway($pid));
@@ -267,7 +288,7 @@ sub do_stop
 		print "Could not stop the gateway.\n";
 		return 1;
 	}
-	wlog_ok("Gateway stopped.");
+	wlog_event("OK", "Gateway stopped.");
 	print "Stopped the gateway.\n";
 	return 0;
 }
@@ -315,7 +336,7 @@ sub do_check
 		wlog_err("The gateway failed $failures times in a row. Not restarting again until it is started manually.");
 		return 1;
 	}
-	wlog_warn("The gateway is not running (failure $failures of $max_failures). Restarting.");
+	wlog_event("WARNING", "The gateway is not running (failure $failures of $max_failures). Restarting.");
 	return do_start();
 }
 

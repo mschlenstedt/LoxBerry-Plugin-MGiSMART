@@ -66,12 +66,41 @@ if ($action eq "pid") {
 	exit 0;
 }
 
-my $log = LoxBerry::Log->new(name => "watchdog", package => $psubfolder);
-if ($verbose) {
-	$log->stdout(1);
-	$log->loglevel(7);
+# The log session is created on first use, never up front.
+#
+# cron runs "check" every five minutes, and each LoxBerry::Log session means a
+# new timestamped file plus a database entry - roughly 288 logfiles a day on a
+# RAM disk, almost all of them stating that everything is fine. A run with
+# nothing to report now writes nothing at all, while every run that actually
+# does something (start, stop, restart, or a check that has to restart the
+# gateway) still gets its own logfile.
+my $log;
+
+sub logsession
+{
+	return $log if ($log);
+	$log = LoxBerry::Log->new(name => "watchdog", package => $psubfolder);
+	if ($verbose) {
+		$log->stdout(1);
+		$log->loglevel(7);
+	}
+	# Claim the exported LOG* functions explicitly. new() only takes that role
+	# when no object holds it yet, and do_start() opens the gateway's own log
+	# session - without this, whichever happened to be created first would
+	# decide where these messages end up.
+	$log->default();
+	LOGSTART("watchdog action=$action");
+	return $log;
 }
-LOGSTART("watchdog action=$action");
+
+sub wlog_inf  { logsession(); LOGINF(@_);  }
+sub wlog_ok   { logsession(); LOGOK(@_);   }
+sub wlog_warn { logsession(); LOGWARN(@_); }
+sub wlog_err  { logsession(); LOGERR(@_);  }
+
+# An explicit --verbose run is always meant to be watched, so it opens the
+# session even when the outcome turns out to be "nothing to do".
+logsession() if ($verbose);
 
 make_path($runtime_dir) if (!-d $runtime_dir);
 
@@ -79,9 +108,9 @@ make_path($runtime_dir) if (!-d $runtime_dir);
 # interface triggers a restart.
 my $lockstate = LoxBerry::System::lock(lockfile => "$psubfolder-watchdog", wait => 120);
 if ($lockstate) {
-	LOGWARN("Another watchdog run is active: $lockstate");
+	wlog_warn("Another watchdog run is active: $lockstate");
 	print "$lockstate currently running - Quitting.\n";
-	LOGEND();
+	LOGEND() if ($log);
 	exit 1;
 }
 
@@ -92,13 +121,13 @@ elsif ($action eq "restart") { $exit = do_restart(); }
 elsif ($action eq "check")   { $exit = do_check(); }
 elsif ($action eq "status")  { $exit = gateway_running() ? 0 : 1; }
 else {
-	LOGERR("No valid action. --action=start|stop|restart|check|status|pid is required.");
+	wlog_err("No valid action. --action=start|stop|restart|check|status|pid is required.");
 	print "No valid action specified. --action=start|stop|restart|check|status|pid is required.\n";
 	$exit = 2;
 }
 
 LoxBerry::System::unlock(lockfile => "$psubfolder-watchdog");
-LOGEND();
+LOGEND() if ($log);
 exit $exit;
 
 ##############################################################################
@@ -111,38 +140,38 @@ sub do_start
 	unlink($stopped_marker) if (-e $stopped_marker);
 
 	if (gateway_running()) {
-		LOGOK("The gateway is already running.");
+		wlog_ok("The gateway is already running.");
 		print "The gateway is already running.\n";
 		return 0;
 	}
 	if (!gateway_installed()) {
-		LOGERR("The gateway is not installed. Install it from the Update tab.");
+		wlog_err("The gateway is not installed. Install it from the Update tab.");
 		print "The gateway is not installed.\n";
 		return 1;
 	}
 
 	my ($have_py, $need_py) = python_requirement_unmet();
 	if ($have_py) {
-		LOGERR("The environment runs Python $have_py, but the gateway needs $need_py or newer. Reinstall it from the Update tab, which provides a suitable Python.");
+		wlog_err("The environment runs Python $have_py, but the gateway needs $need_py or newer. Reinstall it from the Update tab, which provides a suitable Python.");
 		print "Python $have_py is too old; the gateway needs $need_py or newer.\n";
 		return 1;
 	}
 
 	my $cfg = plugin_config();
 	if (!length(mg_trim($cfg->{saic_user} // "")) || !length($cfg->{saic_password} // "")) {
-		LOGERR("No iSMART credentials configured. Enter them on the Settings tab.");
+		wlog_err("No iSMART credentials configured. Enter them on the Settings tab.");
 		print "No iSMART credentials configured.\n";
 		return 1;
 	}
 
 	my $mqtt = eval { LoxBerry::IO::mqtt_connectiondetails() } || {};
 	if (!$mqtt->{brokerhost}) {
-		LOGWARN("No MQTT broker details available from LoxBerry. Starting without a broker connection.");
+		wlog_warn("No MQTT broker details available from LoxBerry. Starting without a broker connection.");
 	}
 
 	my $env_extra = write_env_file($cfg, $mqtt);
 	if (!$env_extra) {
-		LOGERR("Could not write $env_file.");
+		wlog_err("Could not write $env_file.");
 		print "Could not write the gateway configuration.\n";
 		return 1;
 	}
@@ -151,11 +180,11 @@ sub do_start
 	my $release = installed_version();
 
 	my $logfile = gateway_logfile();
-	LOGINF("Starting the gateway ($venv_python $gateway_py), log level $loglevel.");
+	wlog_inf("Starting the gateway ($venv_python $gateway_py), log level $loglevel.");
 
 	my $pid = fork();
 	if (!defined($pid)) {
-		LOGERR("Could not fork: $!");
+		wlog_err("Could not fork: $!");
 		return 1;
 	}
 	if ($pid == 0) {
@@ -189,12 +218,12 @@ sub do_start
 	# that is already over.
 	sleep 3;
 	if (!gateway_running()) {
-		LOGERR("The gateway exited right after the start. See the gateway log.");
+		wlog_err("The gateway exited right after the start. See the gateway log.");
 		print "The gateway did not stay running. Check the gateway log.\n";
 		return 1;
 	}
 	reset_failures();
-	LOGOK("Gateway started (PID $pid).");
+	wlog_ok("Gateway started (PID $pid).");
 	print "Started the gateway (PID $pid).\n";
 	return 0;
 }
@@ -214,31 +243,31 @@ sub do_stop
 		$pid = find_gateway_pid();
 	}
 	if (!$pid) {
-		LOGOK("The gateway is not running.");
+		wlog_ok("The gateway is not running.");
 		print "The gateway is not running.\n";
 		unlink($pid_file);
 		return 0;
 	}
 
-	LOGINF("Stopping the gateway (PID $pid).");
+	wlog_inf("Stopping the gateway (PID $pid).");
 	kill("TERM", $pid);
 	for (1 .. 20) {
 		last if (!process_is_gateway($pid));
 		select(undef, undef, undef, 0.25);
 	}
 	if (process_is_gateway($pid)) {
-		LOGWARN("The gateway did not stop on TERM, sending KILL.");
+		wlog_warn("The gateway did not stop on TERM, sending KILL.");
 		kill("KILL", $pid);
 		select(undef, undef, undef, 0.5);
 	}
 	unlink($pid_file);
 
 	if (process_is_gateway($pid)) {
-		LOGERR("Could not stop the gateway (PID $pid).");
+		wlog_err("Could not stop the gateway (PID $pid).");
 		print "Could not stop the gateway.\n";
 		return 1;
 	}
-	LOGOK("Gateway stopped.");
+	wlog_ok("Gateway stopped.");
 	print "Stopped the gateway.\n";
 	return 0;
 }
@@ -256,35 +285,37 @@ sub do_restart
 # so a broken configuration is not restarted forever.
 sub do_check
 {
-	if (-e $stopped_marker) {
-		LOGOK("The gateway was stopped manually. Nothing to do.");
-		return 0;
-	}
-	if (!gateway_installed()) {
-		LOGOK("The gateway is not installed. Nothing to do.");
-		return 0;
-	}
+	# Every path that concludes "nothing to do" returns SILENTLY - no log call,
+	# so no log session and no logfile. This runs from cron every five minutes;
+	# a line saying that all is well, written 288 times a day onto a RAM disk,
+	# buries the runs that actually matter. Only acting is worth recording.
+	#
+	# An explicit --verbose run still logs, because logsession() is opened up
+	# front for it.
+
+	return 0 if (-e $stopped_marker);
+	return 0 if (!gateway_installed());
+
 	# Nothing to supervise before the plugin has been set up. Without this the
 	# cron check would fail a start every five minutes on a freshly installed
 	# plugin and fill the log with errors about missing credentials.
 	my $cfg = plugin_config();
 	if (!length(mg_trim($cfg->{saic_user} // "")) || !length($cfg->{saic_password} // "")) {
-		LOGOK("No iSMART account configured yet. Nothing to do.");
 		return 0;
 	}
+
 	if (gateway_running()) {
 		reset_failures();
-		LOGOK("The gateway is running.");
 		return 0;
 	}
 
 	my $failures = read_failures() + 1;
 	write_failures($failures);
 	if ($failures > $max_failures) {
-		LOGERR("The gateway failed $failures times in a row. Not restarting again until it is started manually.");
+		wlog_err("The gateway failed $failures times in a row. Not restarting again until it is started manually.");
 		return 1;
 	}
-	LOGWARN("The gateway is not running (failure $failures of $max_failures). Restarting.");
+	wlog_warn("The gateway is not running (failure $failures of $max_failures). Restarting.");
 	return do_start();
 }
 

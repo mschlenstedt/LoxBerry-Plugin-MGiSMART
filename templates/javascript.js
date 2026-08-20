@@ -378,6 +378,10 @@ function setLoad() {
 			$("#set-topic").val(c.mqtt_topic || "saic");
 			$("#set-hadiscovery").prop("checked", !!Number(c.ha_discovery_enabled));
 			$("#set-allowdots").prop("checked", !!Number(c.mqtt_allow_dots_in_topic));
+			$("#set-refreshinactive").val(c.refresh_period_inactive || "");
+			$("#set-refreshactive").val(c.refresh_period_active || "");
+			$("#set-refreshshutdown").val(c.refresh_period_after_shutdown || "");
+			$("#set-refreshgrace").val(c.refresh_period_inactive_grace || "");
 			$("#set-relogin").val(c.saic_relogin_delay || "");
 			$("#set-messages").val(c.messages_request_interval || "");
 			$("#set-accountrefresh").val(c.account_refresh_interval || "");
@@ -398,6 +402,10 @@ function setSave() {
 		mqtt_topic:                $("#set-topic").val(),
 		ha_discovery_enabled:      $("#set-hadiscovery").prop("checked") ? 1 : 0,
 		mqtt_allow_dots_in_topic:  $("#set-allowdots").prop("checked") ? 1 : 0,
+		refresh_period_inactive:       $("#set-refreshinactive").val(),
+		refresh_period_active:         $("#set-refreshactive").val(),
+		refresh_period_after_shutdown: $("#set-refreshshutdown").val(),
+		refresh_period_inactive_grace: $("#set-refreshgrace").val(),
 		saic_relogin_delay:        $("#set-relogin").val(),
 		messages_request_interval: $("#set-messages").val(),
 		account_refresh_interval:  $("#set-accountrefresh").val(),

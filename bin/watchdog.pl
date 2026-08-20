@@ -22,6 +22,7 @@
 use strict;
 use warnings;
 use Getopt::Long;
+use JSON::PP;
 use File::Path qw(make_path);
 use POSIX qw(setsid);
 use FindBin;
@@ -29,7 +30,7 @@ use lib $FindBin::Bin;
 use LoxBerry::System;
 use LoxBerry::Log;
 use LoxBerry::IO;
-use MGiSMART qw(plugin_config installed_version gateway_installed derive_log_levels mg_trim is_true);
+use MGiSMART qw(plugin_config installed_version gateway_installed topic_root derive_log_levels mqtt_read mqtt_vins mg_trim is_true);
 
 my $psubfolder  = $lbpplugindir;
 my $config_dir  = $lbpconfigdir;
@@ -53,6 +54,52 @@ my %REST_URI = (
 	eu => "https://gateway-mg-eu.soimt.com/api.app/v1/",
 	au => "https://gateway-mg-au.soimt.com/api.app/v1/",
 	tr => "https://gateway-mg-tr.soimt.com/api.app/v1/",
+);
+
+# How often the gateway asks the car for its state.
+#
+# The gateway accepts these ONLY as retained MQTT messages - there is no
+# environment variable and no command line option for them, so the generated
+# .env cannot carry them. The topics are per VIN, and the VIN is not known
+# until the gateway has logged in and published it. Both together are why this
+# runs from the five minute check instead of from do_start(): the check sees a
+# gateway that is already up, and publishing is idempotent, so an interval that
+# is already correct costs nothing.
+#
+# The gateway's own default for the inactive interval is 86400 - once a day, to
+# spare the 12V battery. That is too coarse for a car that charges overnight on
+# a timer: the state that arrives in the morning is still the one from the
+# evening before. The plugin therefore defaults to an hour and lets the ladder
+# below back off again when the car really is standing still.
+my @REFRESH_PERIODS = (
+	{ key => "refresh_period_active",         topic => "active",        default => 30   },
+	{ key => "refresh_period_inactive",       topic => "inActive",      default => 3600 },
+	{ key => "refresh_period_after_shutdown", topic => "afterShutdown", default => 120  },
+	{ key => "refresh_period_inactive_grace", topic => "inActiveGrace", default => 600  },
+);
+
+# The values that decide whether anything happened to the car.
+#
+# Deliberately a short, hand picked list. A hash over everything the gateway
+# publishes would never hold still: interior and exterior temperature, the 12V
+# voltage and the GPS position all drift by themselves, and the back off below
+# would never trigger. What is left is what only changes when someone or
+# something actually acts on the car.
+my @FINGERPRINT_TOPICS = (
+	"drivetrain/soc",                # charging and driving
+	"drivetrain/mileage",            # driving
+	"drivetrain/chargerConnected",   # plugged in, before charging even starts
+	"drivetrain/socTarget",          # charge target changed in the app
+	"doors/locked",                  # someone was at the car
+);
+
+# How far the inactive interval may climb while nothing happens, as
+# [quiet seconds, interval]. Applied on top of the configured interval: a
+# larger user value always wins, so the ladder can only ever make the polling
+# gentler, never more aggressive.
+my @REFRESH_LADDER = (
+	[ 24 * 3600, 12 * 3600 ],
+	[ 48 * 3600, 24 * 3600 ],
 );
 
 my ($verbose, $action);
@@ -79,7 +126,29 @@ my $log;
 sub logsession
 {
 	return $log if ($log);
-	$log = LoxBerry::Log->new(name => "watchdog", package => $psubfolder);
+	# One logfile that every run appends to, instead of one file per run.
+	#
+	# "nosession" is what LoxBerry::Log offers for a continuously written
+	# log: it forces append mode, suppresses the LOGSTART/LOGEND separator
+	# blocks, and resolves the database entry through the FILENAME instead
+	# of opening a new session - creating that entry on first use and
+	# reusing it ever after (log_db_get_session_by_filename). The filename
+	# therefore has to be a fixed one; the default carries a timestamp and
+	# would produce a new file, and a new log manager entry, every run.
+	#
+	# That is what this used to do, and with cron calling "check" every five
+	# minutes it would scatter the refresh policy history below over
+	# hundreds of unrelated files. Keeping the file from growing without
+	# bound is not this script's business - log_maint.pl does that.
+	$log = LoxBerry::Log->new(
+		name      => "watchdog",
+		package   => $psubfolder,
+		filename  => "$lbplogdir/watchdog.log",
+		nosession => 1,
+		# A file that spans days needs the time on every single line; with
+		# one file per run the session header used to carry it.
+		addtime   => 1,
+	);
 	if ($verbose) {
 		$log->stdout(1);
 		$log->loglevel(7);
@@ -327,6 +396,7 @@ sub do_check
 
 	if (gateway_running()) {
 		reset_failures();
+		apply_refresh_policy($cfg);
 		return 0;
 	}
 
@@ -338,6 +408,244 @@ sub do_check
 	}
 	wlog_event("WARNING", "The gateway is not running (failure $failures of $max_failures). Restarting.");
 	return do_start();
+}
+
+##############################################################################
+# Refresh periods
+##############################################################################
+
+# The tables this section works with - @REFRESH_PERIODS, @FINGERPRINT_TOPICS
+# and @REFRESH_LADDER - are declared at the top of the file. A file scoped
+# "my" is only assigned once execution reaches it, and the action dispatch
+# runs above this point, so declaring them here would leave them empty.
+
+sub policy_state_file { return "$runtime_dir/refresh_policy.json"; }
+
+# Brings every vehicle's refresh periods in line with the settings and the
+# back off ladder. Silent unless something actually changes.
+sub apply_refresh_policy
+{
+	my ($cfg) = @_;
+
+	my $root = topic_root($cfg);
+	return if (!length($root));
+
+	# No answer means no gateway topics on the broker yet, or no broker at all.
+	# Neither is this run's problem - do_check() has already established that
+	# the process is alive.
+	my @vins = mqtt_vins($root);
+	return if (!@vins);
+
+	my $previous = read_policy_state();
+	my $now      = time();
+	my %state;
+
+	foreach my $vin (@vins) {
+		$state{$vin} = refresh_policy_for_vehicle($cfg, $root, $vin, $previous->{$vin}, $now);
+	}
+
+	# Vehicles that disappeared from the account are dropped with the rewrite.
+	write_policy_state(\%state);
+	return;
+}
+
+sub refresh_policy_for_vehicle
+{
+	my ($cfg, $root, $vin, $previous, $now) = @_;
+	$previous = {} if (ref($previous) ne "HASH");
+
+	my $base = "$root/vehicles/$vin";
+
+	# A read that times out must not look like a change. Without this a
+	# moment of broker latency would read the value as empty, count as
+	# activity, reset the ladder and write a line about a value that never
+	# moved - so the last known value is kept instead.
+	my $before = (ref($previous->{values}) eq "HASH") ? $previous->{values} : {};
+	my %values;
+	foreach my $topic (@FINGERPRINT_TOPICS) {
+		my $value = mqtt_read("$base/$topic", 500);
+		$value = $before->{$topic} if (!defined($value));
+		$values{$topic} = $value // "";
+	}
+	my $phase    = mqtt_read("$base/refresh/pollingPhase", 500) // "";
+	my $activity = mqtt_read("$base/refresh/lastActivity", 500) // $previous->{activity} // "";
+	my $cable    = is_true($values{"drivetrain/chargerConnected"});
+
+	# On the first sighting there is nothing to compare against, so the quiet
+	# clock simply starts now - without claiming that anything changed.
+	my $first  = (ref($previous->{values}) eq "HASH") ? 0 : 1;
+	my $reason = $first ? undef : refresh_activity_reason($previous, \%values, $phase, $activity);
+
+	my $since = $previous->{since};
+	$since = $now if ($first || defined($reason) || !$since || $since > $now);
+	my $quiet = $now - $since;
+
+	my $step = 0;
+	foreach my $rung (@REFRESH_LADDER) {
+		$step = $rung->[1] if ($quiet >= $rung->[0]);
+	}
+
+	# A car on the cable can start charging at any moment without anyone
+	# touching it - a timer in the car, the wallbox, the tariff. Letting the
+	# interval climb here is exactly how a scheduled night charge stays
+	# invisible until the next day, which is the case this mechanism exists
+	# for. Unplugged, the car really is dormant and may back off.
+	my $hold = ($step > 0 && $cable) ? 1 : 0;
+	$step = 0 if ($hold);
+
+	my %wanted = refresh_period_targets($cfg);
+	$wanted{inActive} = $step if ($step > $wanted{inActive});
+
+	# Why the inactive interval is what it is - the one line worth reading in
+	# this log a week later.
+	my $why = "";
+	if    ($hold)                               { $why = "charging cable connected"; }
+	elsif ($step > ($previous->{step} // 0))    { $why = "no change seen for " . human_span($quiet); }
+	elsif (defined($reason) && length($reason)) { $why = $reason; }
+
+	# Bring every period in line, and keep track of what was published: a
+	# value the gateway never picks up would otherwise produce the same line
+	# every five minutes forever - a car removed from the account whose
+	# retained topics linger is exactly that case.
+	my %published = (ref($previous->{published}) eq "HASH") ? %{$previous->{published}} : ();
+	foreach my $period (@REFRESH_PERIODS) {
+		my $topic = $period->{topic};
+		my $want  = $wanted{$topic};
+
+		my $have  = mqtt_read("$base/refresh/period/$topic", 500);
+		my $known = (defined($have) && $have =~ /\A\d+\z/) ? int($have) : undef;
+		if (defined($known) && $known == $want) {
+			$published{$topic} = $want;
+			next;
+		}
+
+		# Retained, because the gateway replays these on every start
+		# (is_replayable_when_retained) - that is how the setting survives a
+		# gateway restart and a reboot.
+		LoxBerry::IO::mqtt_retain("$base/refresh/period/$topic/set", $want);
+
+		my $repeat = (defined($published{$topic}) && $published{$topic} == $want) ? 1 : 0;
+		$published{$topic} = $want;
+		next if ($repeat);
+
+		my $message = mask_vin($vin) . ": $topic query interval ";
+		$message .= defined($known) ? human_period($known) . " -> " . human_period($want)
+		                            : "set to " . human_period($want);
+		$message .= " ($why)" if ($topic eq "inActive" && length($why));
+		wlog_event("INFO", $message);
+	}
+
+	# The hold produces no value change, so without its own line it would be
+	# invisible - and "why did it never back off?" is exactly the question
+	# someone will ask.
+	if ($hold && !$previous->{hold}) {
+		wlog_event("INFO", mask_vin($vin) . ": inActive query interval held at "
+			. human_period($wanted{inActive}) . " (charging cable connected)");
+	}
+
+	return {
+		values    => \%values,
+		activity  => $activity,
+		since     => $since,
+		step      => $step,
+		hold      => $hold,
+		published => \%published,
+	};
+}
+
+# What happened to the car since the last run, as text - or undef for "nothing".
+sub refresh_activity_reason
+{
+	my ($previous, $values, $phase, $activity) = @_;
+
+	my @changed;
+	foreach my $topic (@FINGERPRINT_TOPICS) {
+		my $was = $previous->{values}{$topic} // "";
+		my $is  = $values->{$topic} // "";
+		next if ($was eq $is);
+		my ($name) = $topic =~ m{([^/]+)\z};
+		push @changed, length($was) ? "$name $was -> $is" : "$name $is";
+	}
+	return join(", ", @changed) if (@changed);
+
+	# The gateway decides the phase itself; anything but "inactive" means it
+	# has already seen the car doing something.
+	return "polling phase $phase" if (length($phase) && lc($phase) ne "inactive");
+
+	# A message from the car - the gateway's own wake up path.
+	my $before = $previous->{activity} // "";
+	return "vehicle message received" if (length($activity) && length($before) && $activity ne $before);
+
+	return undef;
+}
+
+# The configured periods, falling back to the defaults for empty fields.
+sub refresh_period_targets
+{
+	my ($cfg) = @_;
+
+	my %want;
+	foreach my $period (@REFRESH_PERIODS) {
+		my $value = mg_trim($cfg->{$period->{key}} // "");
+		$want{$period->{topic}} = ($value =~ /\A\d+\z/ && $value > 0) ? int($value) : $period->{default};
+	}
+	return %want;
+}
+
+sub read_policy_state
+{
+	my $raw = read_whole_file(policy_state_file());
+	return {} if (!defined($raw) || $raw !~ /\S/);
+	my $data = eval { JSON::PP->new->relaxed->decode($raw) };
+	return {} if ($@ || ref($data) ne "HASH");
+	return $data;
+}
+
+# Lives on the RAM disk on purpose: after a reboot the ladder starts at the
+# bottom again, which polls a dormant car a little more often than necessary
+# for a day - the harmless direction of being wrong.
+sub write_policy_state
+{
+	my ($state) = @_;
+
+	my $json = eval { JSON::PP->new->canonical->pretty->encode($state) };
+	return if ($@ || !defined($json));
+	open(my $fh, ">", policy_state_file()) or return;
+	print $fh $json;
+	close($fh);
+	return;
+}
+
+# VINs identify a car and its owner, and logs get pasted into forum posts.
+sub mask_vin
+{
+	my ($vin) = @_;
+	return $vin if (length($vin) < 8);
+	return substr($vin, 0, 3) . "..." . substr($vin, -4);
+}
+
+sub human_period
+{
+	my ($seconds) = @_;
+
+	return "${seconds}s"              if ($seconds < 60);
+	return int($seconds / 60) . "m"   if ($seconds < 3600);
+
+	my $hours   = int($seconds / 3600);
+	my $minutes = int(($seconds % 3600) / 60);
+	return ($minutes ? "${hours}h${minutes}m" : "${hours}h") if ($seconds < 86400);
+
+	my $days = int($seconds / 86400);
+	$hours   = int(($seconds % 86400) / 3600);
+	return $hours ? "${days}d${hours}h" : "${days}d";
+}
+
+sub human_span
+{
+	my ($seconds) = @_;
+	my $hours   = int($seconds / 3600);
+	my $minutes = int(($seconds % 3600) / 60);
+	return sprintf("%dh%02dm", $hours, $minutes);
 }
 
 ##############################################################################

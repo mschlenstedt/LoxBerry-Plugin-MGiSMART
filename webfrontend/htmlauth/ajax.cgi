@@ -16,7 +16,7 @@ use LoxBerry::System;
 # above, so the following "use lib" picks it up.
 use lib $lbpbindir;
 use LoxBerry::IO;
-use MGiSMART qw(plugin_config installed_version gateway_installed topic_root topic_prefix managed_env_keys derive_log_levels mg_trim);
+use MGiSMART qw(plugin_config installed_version gateway_installed topic_root topic_prefix managed_env_keys derive_log_levels mqtt_read mg_trim);
 
 my $cgi    = CGI->new;
 my $q      = $cgi->Vars;
@@ -40,6 +40,10 @@ my @CONFIG_KEYS = qw(
 	mqtt_topic
 	mqtt_allow_dots_in_topic
 	ha_discovery_enabled
+	refresh_period_active
+	refresh_period_inactive
+	refresh_period_after_shutdown
+	refresh_period_inactive_grace
 	saic_relogin_delay
 	messages_request_interval
 	account_refresh_interval
@@ -121,14 +125,6 @@ sub gw_action
 ##############################################################################
 # Cloud status (retained topics published by the gateway)
 ##############################################################################
-
-sub mqtt_read
-{
-	my ($topic) = @_;
-	my $value = eval { LoxBerry::IO::mqtt_get($topic, 600) };
-	return undef if ($@ || !defined($value) || $value eq "");
-	return $value;
-}
 
 sub cloud_status
 {
@@ -223,6 +219,17 @@ sub config_set
 	my $region = lc(mg_trim($payload->{saic_region} // "eu"));
 	$region = "eu" if ($region !~ /\A(?:eu|au|tr)\z/);
 	$payload->{saic_region} = $region;
+
+	# The refresh periods are published straight onto the broker, so nothing
+	# but a positive whole number of seconds may reach the config. Anything
+	# else is stored as empty, which means "use the default" - and shows the
+	# user on the next load that the entry was not taken.
+	foreach my $key (qw(refresh_period_active refresh_period_inactive
+		refresh_period_after_shutdown refresh_period_inactive_grace)) {
+		next if (!exists($payload->{$key}));
+		my $seconds = mg_trim($payload->{$key} // "");
+		$payload->{$key} = ($seconds =~ /\A\d+\z/ && $seconds > 0) ? int($seconds) : "";
+	}
 
 	my $channel = mg_trim($payload->{update_channel} // "release");
 	$payload->{update_channel} = ($channel eq "prerelease") ? "prerelease" : "release";

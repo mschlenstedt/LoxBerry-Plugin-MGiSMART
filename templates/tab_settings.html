@@ -95,6 +95,37 @@
 </details>
 
 <details class="lb-collapsible">
+	<summary style="font-size:1.15em; font-weight:700;"><TMPL_VAR MGISMART.SET_SECTION_POLLING></summary>
+	<div class="lb-collapsible-content">
+		<p style="color:var(--lb-text-muted); font-size:0.9rem; line-height:1.6; margin:0 0 16px;"><TMPL_VAR MGISMART.SET_POLLING_HINT></p>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="set-refreshinactive"><TMPL_VAR MGISMART.SET_REFRESHINACTIVE></label>
+			<div class="lb-form-field"><input class="lb-input" type="number" id="set-refreshinactive" min="0" placeholder="3600"></div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.SET_REFRESHINACTIVE_HELP></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="set-refreshactive"><TMPL_VAR MGISMART.SET_REFRESHACTIVE></label>
+			<div class="lb-form-field"><input class="lb-input" type="number" id="set-refreshactive" min="0" placeholder="30"></div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.SET_REFRESHACTIVE_HELP></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="set-refreshshutdown"><TMPL_VAR MGISMART.SET_REFRESHSHUTDOWN></label>
+			<div class="lb-form-field"><input class="lb-input" type="number" id="set-refreshshutdown" min="0" placeholder="120"></div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.SET_REFRESHSHUTDOWN_HELP></div>
+		</div>
+
+		<div class="lb-form-row">
+			<label class="lb-form-label" for="set-refreshgrace"><TMPL_VAR MGISMART.SET_REFRESHGRACE></label>
+			<div class="lb-form-field"><input class="lb-input" type="number" id="set-refreshgrace" min="0" placeholder="600"></div>
+			<div class="lb-form-help"><TMPL_VAR MGISMART.SET_REFRESHGRACE_HELP></div>
+		</div>
+	</div>
+</details>
+
+<details class="lb-collapsible">
 	<summary style="font-size:1.15em; font-weight:700;"><TMPL_VAR MGISMART.SET_SECTION_ADVANCED></summary>
 	<div class="lb-collapsible-content">
 		<p style="color:var(--lb-text-muted); font-size:0.9rem; line-height:1.6; margin:0 0 16px;"><TMPL_VAR MGISMART.SET_ADVANCED_HINT></p>

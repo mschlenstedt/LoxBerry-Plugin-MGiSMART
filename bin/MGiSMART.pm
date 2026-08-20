@@ -12,6 +12,7 @@ use strict;
 use warnings;
 use JSON::PP;
 use LoxBerry::System;
+use LoxBerry::IO;
 
 use base 'Exporter';
 our @EXPORT_OK = qw(
@@ -24,6 +25,8 @@ our @EXPORT_OK = qw(
 	derive_log_levels
 	config_dir
 	data_dir
+	mqtt_read
+	mqtt_vins
 	mg_trim
 	is_true
 );
@@ -211,6 +214,71 @@ sub is_true
 	return $value ? 1 : 0 if (JSON::PP::is_bool($value));
 	return 0 if (ref($value));
 	return ($value && $value ne "0" && lc($value) ne "false") ? 1 : 0;
+}
+
+##############################################################################
+# Reading the gateway back through MQTT
+##############################################################################
+
+# One retained value, or undef when the topic does not exist.
+#
+# Every caller wants the same thing: ask the broker, treat "no answer" and
+# "empty answer" alike, and never let a broker problem take the whole script
+# down. That was written out three times - in ajax.cgi, in healthcheck and in
+# the watchdog - so it lives here now.
+sub mqtt_read
+{
+	my ($topic, $timeout_msecs) = @_;
+	$timeout_msecs = 600 if (!$timeout_msecs);
+
+	my $value = eval { LoxBerry::IO::mqtt_get($topic, $timeout_msecs) };
+	return undef if ($@ || !defined($value) || $value eq "");
+	return $value;
+}
+
+# The VINs the gateway currently publishes under, sorted.
+#
+# LoxBerry::IO has no multi-topic read: mqtt_get() returns the first value it
+# receives and throws the topic it arrived on away - and the topic is the only
+# place the VIN appears. So the subscription is collected here, while the
+# connection, the credentials and the TLS setup still come from the library.
+#
+# "available" is the discovery topic because the gateway publishes it for every
+# vehicle right after the login, before it has polled anything.
+sub mqtt_vins
+{
+	my ($root, $timeout_msecs) = @_;
+	return () if (!defined($root) || !length($root));
+	$timeout_msecs = 1500 if (!$timeout_msecs);
+
+	require Time::HiRes;
+
+	my $mqtt = eval { LoxBerry::IO::mqtt_connect() };
+	return () if ($@ || !$mqtt);
+
+	my %vins;
+	my $filter = "$root/vehicles/+/available";
+
+	eval {
+		$mqtt->subscribe($filter, sub {
+			my ($topic) = @_;
+			$vins{$1} = 1 if ($topic =~ m{/vehicles/([^/]+)/});
+		});
+
+		# Retained messages arrive in one burst, but not necessarily within a
+		# single tick - so the whole window is waited out instead of stopping
+		# at the first hit, which would find only one car on a multi-car
+		# account.
+		my $deadline = Time::HiRes::time() + $timeout_msecs / 1000;
+		while (Time::HiRes::time() < $deadline) {
+			$mqtt->tick();
+			Time::HiRes::sleep(0.05);
+		}
+
+		$mqtt->unsubscribe($filter);
+	};
+
+	return sort keys %vins;
 }
 
 1;

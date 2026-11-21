@@ -172,8 +172,9 @@ sub _sanitize
 # indistinguishable. A literal translation would leave a freshly installed
 # plugin with a completely silent gateway, so 0 maps to INFO.
 #
-# The gmqtt client is very chatty in normal operation, so its own level is
-# capped at WARNING unless the plugin is set to DEBUG.
+# The MQTT client (gmqtt up to gateway 0.12, aiomqtt from 0.13.0) is very
+# chatty in normal operation, so its own level is capped at WARNING unless the
+# plugin is set to DEBUG.
 sub derive_log_levels
 {
 	my $level = LoxBerry::System::pluginloglevel();

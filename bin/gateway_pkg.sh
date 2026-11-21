@@ -57,11 +57,6 @@ CACHE_TTL=21600   # 6 hours
 # one more moving part for the same tarball.
 PBS_REPO="astral-sh/python-build-standalone"
 
-# Modules that must import successfully before a build is activated. Without
-# this check a broken dependency set would only show up as a gateway that dies
-# right after every start.
-IMPORT_CHECK="saic_ismart_client_ng, gmqtt, httpx, apscheduler, dotenv, inflection"
-
 # Filled in by build_new and consumed by activate_new.
 NEW_VERSION=""
 NEW_TAG=""
@@ -633,8 +628,59 @@ EOF
 		return 4
 	fi
 
-	if ! "$VENV_DIR.new/bin/python" -c "import $IMPORT_CHECK" >/dev/null 2>&1; then
+	# Every dependency must import before the build is activated. Without this
+	# check a broken dependency set would only show up as a gateway that dies
+	# right after every start.
+	#
+	# The modules to import are derived from the same dependency list pip just
+	# installed, not kept as a fixed list here: a fixed list goes stale as soon
+	# as a release swaps a library (0.13.0 replaced gmqtt with aiomqtt) and then
+	# rejects a perfectly good build. Distribution and module names differ
+	# (python-dotenv installs dotenv), so the installed metadata maps them.
+	if ! importcheck="$("$VENV_DIR.new/bin/python" - "$reqs" 2>&1 <<'EOF'
+import importlib, re, sys
+from importlib.metadata import packages_distributions
+# The venv was just created with pip, which brings its own copy of packaging.
+from pip._vendor.packaging.requirements import Requirement
+
+def norm(name):
+    return re.sub(r"[-_.]+", "-", name).lower()
+
+modules_of = {}
+for module, dists in packages_distributions().items():
+    if module.startswith("_"):
+        continue
+    for dist in dists:
+        modules_of.setdefault(norm(dist), set()).add(module)
+
+failed = []
+with open(sys.argv[1], encoding="utf-8") as fh:
+    for line in fh:
+        if not line.strip():
+            continue
+        req = Requirement(line)
+        # A dependency limited to other platforms or Python versions is
+        # rightly absent.
+        if req.marker is not None and not req.marker.evaluate():
+            continue
+        name = req.name
+        modules = modules_of.get(norm(name))
+        if not modules:
+            failed.append("%s: not installed" % name)
+            continue
+        for module in sorted(modules):
+            try:
+                importlib.import_module(module)
+            except Exception as exc:
+                failed.append("%s: import %s: %s: %s"
+                              % (name, module, type(exc).__name__, exc))
+
+if failed:
+    raise SystemExit("\n".join(failed))
+EOF
+	)"; then
 		echo "<ERROR> The installed dependencies are incomplete: import check failed"
+		printf '%s\n' "$importcheck"
 		rm -rf "$GATEWAY_DIR.new" "$VENV_DIR.new"
 		return 4
 	fi

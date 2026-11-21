@@ -291,9 +291,13 @@ sub do_start
 
 		# log_config.py reads these with os.getenv(), so they bypass the merged
 		# .env dictionary entirely and have to be real environment variables.
-		$ENV{LOG_LEVEL}       = $loglevel;
-		$ENV{MQTT_LOG_LEVEL}  = $mqtt_loglevel;
-		$ENV{RELEASE_VERSION} = $release if ($release);
+		# The MQTT client's level goes out under both names: up to 0.12 the
+		# gateway used gmqtt, read via MQTT_LOG_LEVEL; from 0.13.0 on it uses
+		# aiomqtt, read via AIOMQTT_LOG_LEVEL. Each version ignores the other.
+		$ENV{LOG_LEVEL}          = $loglevel;
+		$ENV{MQTT_LOG_LEVEL}     = $mqtt_loglevel;
+		$ENV{AIOMQTT_LOG_LEVEL}  = $mqtt_loglevel;
+		$ENV{RELEASE_VERSION}    = $release if ($release);
 
 		# The working directory decides where the gateway looks for its
 		# configuration: argparse_extensions.py calls dotenv_values(".env"),
